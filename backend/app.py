@@ -502,6 +502,8 @@ def get_market_prices(
     crop_name: str | None = None,
     district: str | None = None,
     market_name: str | None = None,
+    from_date: str | None = None,
+    to_date: str | None = None,
     db: Session = Depends(get_db)
 ):
     query = """
@@ -525,16 +527,24 @@ def get_market_prices(
     params = {}
 
     if crop_name:
-        query += " AND crop_name = :crop_name"
+        query += " AND LOWER(crop_name) = LOWER(:crop_name)"
         params["crop_name"] = crop_name
 
     if district:
-        query += " AND district = :district"
+        query += " AND LOWER(district) = LOWER(:district)"
         params["district"] = district
 
     if market_name:
-        query += " AND market_name = :market_name"
+        query += " AND LOWER(market_name) = LOWER(:market_name)"
         params["market_name"] = market_name
+
+    if from_date:
+        query += " AND price_date >= CAST(:from_date AS DATE)"
+        params["from_date"] = from_date
+
+    if to_date:
+        query += " AND price_date <= CAST(:to_date AS DATE)"
+        params["to_date"] = to_date
 
     query += """
         ORDER BY price_date DESC, modal_price_per_quintal DESC
