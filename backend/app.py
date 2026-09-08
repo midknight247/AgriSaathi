@@ -1,7 +1,8 @@
 from fastapi import Depends, FastAPI, Query
-from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+from pydantic import BaseModel, Field
+from decimal import Decimal
 
 from database import get_db
 
@@ -553,3 +554,445 @@ def get_market_prices(
     result = db.execute(text(query), params)
 
     return [dict(row._mapping) for row in result]
+
+
+
+class LogisticsProviderCreate(BaseModel):
+    provider_name: str
+    phone_number: str = Field(pattern=r"^[6-9][0-9]{9}$")
+    district: str
+    service_area: str | None = None
+    vehicle_type: str | None = None
+    capacity_kg: Decimal | None = None
+    estimated_cost: Decimal | None = None
+
+
+@app.post("/logistics-providers")
+def create_logistics_provider(
+    provider: LogisticsProviderCreate,
+    db: Session = Depends(get_db)
+):
+    allowed_vehicle_types = {
+        "mini_truck",
+        "tempo",
+        "truck",
+        "tractor_trolley",
+    }
+
+    if (
+        provider.vehicle_type is not None
+        and provider.vehicle_type not in allowed_vehicle_types
+    ):
+        return {
+            "message": "Invalid vehicle_type",
+            "allowed_vehicle_types": sorted(allowed_vehicle_types),
+        }
+
+    if provider.capacity_kg is not None and provider.capacity_kg <= 0:
+        return {"message": "capacity_kg must be greater than zero"}
+
+    if provider.estimated_cost is not None and provider.estimated_cost < 0:
+        return {"message": "estimated_cost cannot be negative"}
+
+    query = text(
+        """
+        INSERT INTO logistics_providers (
+            provider_name,
+            phone_number,
+            district,
+            service_area,
+            vehicle_type,
+            capacity_kg,
+            estimated_cost,
+            is_demo_record,
+            is_active
+        )
+        VALUES (
+            :provider_name,
+            :phone_number,
+            :district,
+            :service_area,
+            :vehicle_type,
+            :capacity_kg,
+            :estimated_cost,
+            TRUE,
+            TRUE
+        )
+        RETURNING
+            id,
+            provider_name,
+            phone_number,
+            district,
+            service_area,
+            vehicle_type,
+            capacity_kg,
+            estimated_cost,
+            is_demo_record,
+            is_active,
+            created_at
+        """
+    )
+
+    result = db.execute(
+        query,
+        {
+            "provider_name": provider.provider_name,
+            "phone_number": provider.phone_number,
+            "district": provider.district,
+            "service_area": provider.service_area,
+            "vehicle_type": provider.vehicle_type,
+            "capacity_kg": provider.capacity_kg,
+            "estimated_cost": provider.estimated_cost,
+        }
+    )
+
+    provider_record = dict(result.fetchone()._mapping)
+    db.commit()
+
+    return provider_record
+
+class PickupRequestCreate(BaseModel):
+    transaction_id: str
+    logistics_provider_id: str
+    pickup_location: str | None = None
+    delivery_location: str | None = None
+    pickup_date: str | None = None
+    notes: str | None = None
+
+
+@app.post("/pickup-requests")
+def create_pickup_request(
+    pickup: PickupRequestCreate,
+    db: Session = Depends(get_db)
+):
+    transaction_query = text(
+        """
+        SELECT
+            id,
+            transaction_status,
+            final_quantity_kg
+        FROM transactions
+        WHERE id = :transaction_id
+        """
+    )
+
+    transaction_result = db.execute(
+        transaction_query,
+        {"transaction_id": pickup.transaction_id}
+    ).fetchone()
+
+    if not transaction_result:
+        return {"message": "Transaction not found"}
+
+    if transaction_result.transaction_status != "confirmed":
+        return {
+            "message": "Pickup can only be requested for a confirmed transaction"
+        }
+
+    provider_query = text(
+        """
+        SELECT
+            id,
+            is_active,
+            capacity_kg
+        FROM logistics_providers
+        WHERE id = :provider_id
+        """
+    )
+
+    provider_result = db.execute(
+        provider_query,
+        {"provider_id": pickup.logistics_provider_id}
+    ).fetchone()
+
+    if not provider_result:
+        return {"message": "Logistics provider not found"}
+
+    if not provider_result.is_active:
+        return {"message": "Logistics provider is inactive"}
+
+    if (
+        provider_result.capacity_kg is not None
+        and provider_result.capacity_kg < transaction_result.final_quantity_kg
+    ):
+        return {
+            "message": "Logistics provider capacity is insufficient"
+        }
+
+    existing_query = text(
+        """
+        SELECT id
+        FROM pickup_requests
+        WHERE transaction_id = :transaction_id
+        """
+    )
+
+    existing_request = db.execute(
+        existing_query,
+        {"transaction_id": pickup.transaction_id}
+    ).fetchone()
+
+    if existing_request:
+        return {
+            "message": "A pickup request already exists for this transaction",
+            "pickup_request_id": str(existing_request.id),
+        }
+
+    insert_query = text(
+        """
+        INSERT INTO pickup_requests (
+            transaction_id,
+            logistics_provider_id,
+            pickup_location,
+            delivery_location,
+            pickup_date,
+            request_status,
+            notes
+        )
+        VALUES (
+            :transaction_id,
+            :provider_id,
+            :pickup_location,
+            :delivery_location,
+            CAST(:pickup_date AS DATE),
+            'requested',
+            :notes
+        )
+        RETURNING
+            id,
+            transaction_id,
+            logistics_provider_id,
+            pickup_location,
+            delivery_location,
+            pickup_date,
+            request_status,
+            notes,
+            created_at
+        """
+    )
+
+    result = db.execute(
+        insert_query,
+        {
+            "transaction_id": pickup.transaction_id,
+            "provider_id": pickup.logistics_provider_id,
+            "pickup_location": pickup.pickup_location,
+            "delivery_location": pickup.delivery_location,
+            "pickup_date": pickup.pickup_date,
+            "notes": pickup.notes,
+        }
+    )
+
+    pickup_record = dict(result.fetchone()._mapping)
+    db.commit()
+
+    return pickup_record
+
+class PickupStatusUpdate(BaseModel):
+    request_status: str
+
+
+@app.patch("/pickup-requests/{pickup_request_id}/status")
+def update_pickup_status(
+    pickup_request_id: str,
+    status_update: PickupStatusUpdate,
+    db: Session = Depends(get_db)
+):
+    allowed_statuses = {
+        "requested",
+        "confirmed",
+        "completed",
+        "cancelled",
+    }
+
+    if status_update.request_status not in allowed_statuses:
+        return {
+            "message": "Invalid request_status",
+            "allowed_statuses": sorted(allowed_statuses),
+        }
+
+    query = text(
+        """
+        SELECT
+            id,
+            request_status
+        FROM pickup_requests
+        WHERE id = :pickup_request_id
+        """
+    )
+
+    result = db.execute(
+        query,
+        {"pickup_request_id": pickup_request_id}
+    ).fetchone()
+
+    if not result:
+        return {"message": "Pickup request not found"}
+
+    current_status = result.request_status
+    new_status = status_update.request_status
+
+    allowed_transitions = {
+        "requested": {"confirmed", "cancelled"},
+        "confirmed": {"completed", "cancelled"},
+        "completed": set(),
+        "cancelled": set(),
+    }
+
+    if new_status not in allowed_transitions[current_status]:
+        return {
+            "message": (
+                f"Cannot change pickup request from "
+                f"'{current_status}' to '{new_status}'"
+            )
+        }
+
+    update_query = text(
+        """
+        UPDATE pickup_requests
+        SET
+            request_status = :request_status,
+            updated_at = now()
+        WHERE id = :pickup_request_id
+        RETURNING
+            id,
+            transaction_id,
+            logistics_provider_id,
+            pickup_location,
+            delivery_location,
+            pickup_date,
+            request_status,
+            notes,
+            created_at,
+            updated_at
+        """
+    )
+
+    updated_result = db.execute(
+        update_query,
+        {
+            "request_status": new_status,
+            "pickup_request_id": pickup_request_id,
+        }
+    )
+
+    pickup_record = dict(updated_result.fetchone()._mapping)
+    db.commit()
+
+    return pickup_record
+
+class PickupProviderUpdate(BaseModel):
+    logistics_provider_id: str
+
+
+@app.patch("/pickup-requests/{pickup_request_id}/provider")
+def assign_logistics_provider(
+    pickup_request_id: str,
+    provider_update: PickupProviderUpdate,
+    db: Session = Depends(get_db)
+):
+    pickup_query = text(
+        """
+        SELECT
+            id,
+            transaction_id,
+            logistics_provider_id,
+            request_status
+        FROM pickup_requests
+        WHERE id = :pickup_request_id
+        """
+    )
+
+    pickup_result = db.execute(
+        pickup_query,
+        {"pickup_request_id": pickup_request_id}
+    ).fetchone()
+
+    if not pickup_result:
+        return {"message": "Pickup request not found"}
+
+    if pickup_result.request_status in {"completed", "cancelled"}:
+        return {
+            "message": "Cannot reassign a completed or cancelled pickup request"
+        }
+
+    provider_query = text(
+        """
+        SELECT
+            id,
+            provider_name,
+            is_active,
+            capacity_kg
+        FROM logistics_providers
+        WHERE id = :provider_id
+        """
+    )
+
+    provider_result = db.execute(
+        provider_query,
+        {"provider_id": provider_update.logistics_provider_id}
+    ).fetchone()
+
+    if not provider_result:
+        return {"message": "Logistics provider not found"}
+
+    if not provider_result.is_active:
+        return {"message": "Logistics provider is inactive"}
+
+    transaction_query = text(
+        """
+        SELECT final_quantity_kg
+        FROM transactions
+        WHERE id = :transaction_id
+        """
+    )
+
+    transaction_result = db.execute(
+        transaction_query,
+        {"transaction_id": pickup_result.transaction_id}
+    ).fetchone()
+
+    if not transaction_result:
+        return {"message": "Linked transaction not found"}
+
+    if (
+        provider_result.capacity_kg is not None
+        and provider_result.capacity_kg < transaction_result.final_quantity_kg
+    ):
+        return {
+            "message": "Logistics provider capacity is insufficient"
+        }
+
+    update_query = text(
+        """
+        UPDATE pickup_requests
+        SET
+            logistics_provider_id = :provider_id,
+            updated_at = now()
+        WHERE id = :pickup_request_id
+        RETURNING
+            id,
+            transaction_id,
+            logistics_provider_id,
+            pickup_location,
+            delivery_location,
+            pickup_date,
+            request_status,
+            notes,
+            created_at,
+            updated_at
+        """
+    )
+
+    updated_result = db.execute(
+        update_query,
+        {
+            "provider_id": provider_update.logistics_provider_id,
+            "pickup_request_id": pickup_request_id,
+        }
+    )
+
+    pickup_record = dict(updated_result.fetchone()._mapping)
+    db.commit()
+
+    return pickup_record
