@@ -252,34 +252,30 @@ def accept_offer(
     db: Session = Depends(get_db)
 ):
     try:
-        offer_query = text("""
-            SELECT
-                id,
-                listing_id,
-                buyer_id,
-                offered_price_per_kg,
-                offered_quantity_kg,
-                offer_status
+        # Step 1: Find which listing this offer belongs to.
+        # This is only a reference lookup, not the locking step.
+        offer_reference_query = text("""
+            SELECT listing_id
             FROM buyer_offers
             WHERE id = :offer_id
-            FOR UPDATE
         """)
 
-        offer = db.execute(
-            offer_query,
+        offer_reference = db.execute(
+            offer_reference_query,
             {"offer_id": offer_id}
         ).mappings().first()
 
-        if offer is None:
+        if offer_reference is None:
+            db.rollback()
             return {
                 "error": "Offer not found"
             }
 
-        if offer["offer_status"] != "pending":
-            return {
-                "error": "This offer is no longer pending"
-            }
+        listing_id = str(offer_reference["listing_id"])
 
+        # Step 2: Lock the listing first.
+        # Every acceptance request for the same listing must pass
+        # through this lock before modifying offers.
         listing_query = text("""
             SELECT
                 id,
@@ -293,101 +289,150 @@ def accept_offer(
 
         listing = db.execute(
             listing_query,
-            {
-                "listing_id": str(offer["listing_id"])
-            }
+            {"listing_id": listing_id}
         ).mappings().first()
 
         if listing is None:
+            db.rollback()
             return {
                 "error": "Listing not found"
             }
 
         if listing["listing_status"] != "active":
+            db.rollback()
             return {
-                "error": "This listing is no longer active"
+                "error": "Listing is no longer active"
             }
 
-        db.execute(
-            text("""
-                UPDATE buyer_offers
-                SET offer_status = 'accepted',
-                    updated_at = NOW()
-                WHERE id = :offer_id
-            """),
+        # Step 3: Lock the specific offer after the listing lock.
+        # Re-read the offer because its status may have changed
+        # since the initial reference lookup.
+        offer_query = text("""
+            SELECT
+                id,
+                listing_id,
+                buyer_id,
+                offered_price_per_kg,
+                offered_quantity_kg,
+                offer_status
+            FROM buyer_offers
+            WHERE id = :offer_id
+              AND listing_id = :listing_id
+            FOR UPDATE
+        """)
+
+        offer = db.execute(
+            offer_query,
             {
+                "offer_id": offer_id,
+                "listing_id": listing_id
+            }
+        ).mappings().first()
+
+        if offer is None:
+            db.rollback()
+            return {
+                "error": "Offer not found"
+            }
+
+        if offer["offer_status"] != "pending":
+            db.rollback()
+            return {
+                "error": "Offer is not pending"
+            }
+
+        # Step 4: Mark the selected offer as accepted.
+        accept_offer_query = text("""
+            UPDATE buyer_offers
+            SET
+                offer_status = 'accepted',
+                updated_at = NOW()
+            WHERE id = :offer_id
+        """)
+
+        db.execute(
+            accept_offer_query,
+            {"offer_id": offer_id}
+        )
+
+        # Step 5: Reject all other pending offers for this listing.
+        reject_other_offers_query = text("""
+            UPDATE buyer_offers
+            SET
+                offer_status = 'rejected',
+                updated_at = NOW()
+            WHERE listing_id = :listing_id
+              AND id <> :offer_id
+              AND offer_status = 'pending'
+        """)
+
+        db.execute(
+            reject_other_offers_query,
+            {
+                "listing_id": listing_id,
                 "offer_id": offer_id
             }
         )
 
-        db.execute(
-            text("""
-                UPDATE buyer_offers
-                SET offer_status = 'rejected',
-                    updated_at = NOW()
-                WHERE listing_id = :listing_id
-                  AND id != :offer_id
-                  AND offer_status = 'pending'
-            """),
-            {
-                "listing_id": str(offer["listing_id"]),
-                "offer_id": offer_id
-            }
-        )
+        # Step 6: Create the transaction.
+        # Do not insert total_amount because PostgreSQL generates it.
+        transaction_query = text("""
+            INSERT INTO transactions (
+                listing_id,
+                offer_id,
+                farmer_id,
+                buyer_id,
+                final_price_per_kg,
+                final_quantity_kg,
+                transaction_status
+            )
+            VALUES (
+                :listing_id,
+                :offer_id,
+                :farmer_id,
+                :buyer_id,
+                :final_price_per_kg,
+                :final_quantity_kg,
+                'confirmed'
+            )
+            RETURNING id
+        """)
 
-        transaction_result = db.execute(
-            text("""
-                INSERT INTO transactions (
-                    listing_id,
-                    offer_id,
-                    farmer_id,
-                    buyer_id,
-                    final_price_per_kg,
-                    final_quantity_kg,
-                    transaction_status
-                )
-                VALUES (
-                    :listing_id,
-                    :offer_id,
-                    :farmer_id,
-                    :buyer_id,
-                    :final_price_per_kg,
-                    :final_quantity_kg,
-                    'confirmed'
-                )
-                RETURNING id
-            """),
+        transaction_id = db.execute(
+            transaction_query,
             {
-                "listing_id": str(offer["listing_id"]),
+                "listing_id": listing_id,
                 "offer_id": offer_id,
                 "farmer_id": str(listing["farmer_id"]),
                 "buyer_id": str(offer["buyer_id"]),
                 "final_price_per_kg": offer["offered_price_per_kg"],
                 "final_quantity_kg": offer["offered_quantity_kg"]
             }
-        )
+        ).scalar_one()
 
-        transaction_id = transaction_result.scalar_one()
+        # Step 7: Mark the listing as sold.
+        update_listing_query = text("""
+            UPDATE produce_listings
+            SET
+                listing_status = 'sold',
+                updated_at = NOW()
+            WHERE id = :listing_id
+        """)
 
         db.execute(
-            text("""
-                UPDATE produce_listings
-                SET listing_status = 'sold',
-                    updated_at = NOW()
-                WHERE id = :listing_id
-            """),
-            {
-                "listing_id": str(offer["listing_id"])
-            }
+            update_listing_query,
+            {"listing_id": listing_id}
         )
 
+        # Step 8: Commit the entire workflow atomically.
         db.commit()
 
         return {
             "message": "Offer accepted successfully",
-            "offer_id": offer_id,
             "transaction_id": str(transaction_id),
-            "listing_status": "sold"
+            "listing_id": listing_id,
+            "offer_id": offer_id,
+            "status": "confirmed"
         }
 
     except Exception:
