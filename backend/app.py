@@ -1,4 +1,4 @@
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Query
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -496,3 +496,50 @@ def get_transaction(
     )
 
     return transaction
+
+@app.get("/market-prices")
+def get_market_prices(
+    crop_name: str | None = None,
+    district: str | None = None,
+    market_name: str | None = None,
+    db: Session = Depends(get_db)
+):
+    query = """
+        SELECT
+            id,
+            crop_name,
+            variety,
+            market_name,
+            district,
+            state,
+            price_date,
+            min_price_per_quintal,
+            max_price_per_quintal,
+            modal_price_per_quintal,
+            arrival_quantity_quintal,
+            source
+        FROM market_prices
+        WHERE 1 = 1
+    """
+
+    params = {}
+
+    if crop_name:
+        query += " AND crop_name = :crop_name"
+        params["crop_name"] = crop_name
+
+    if district:
+        query += " AND district = :district"
+        params["district"] = district
+
+    if market_name:
+        query += " AND market_name = :market_name"
+        params["market_name"] = market_name
+
+    query += """
+        ORDER BY price_date DESC, modal_price_per_quintal DESC
+    """
+
+    result = db.execute(text(query), params)
+
+    return [dict(row._mapping) for row in result]
