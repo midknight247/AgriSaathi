@@ -396,3 +396,58 @@ def accept_offer(
         return {
             "error": "Could not accept offer"
         }
+
+@app.get("/transactions/{transaction_id}")
+def get_transaction(
+    transaction_id: str,
+    db: Session = Depends(get_db)
+):
+    query = text("""
+        SELECT
+            id,
+            listing_id,
+            offer_id,
+            farmer_id,
+            buyer_id,
+            final_price_per_kg,
+            final_quantity_kg,
+            total_amount,
+            transaction_status,
+            payment_status,
+            created_at,
+            updated_at
+        FROM transactions
+        WHERE id = :transaction_id
+    """)
+
+    result = db.execute(
+        query,
+        {"transaction_id": transaction_id}
+    ).mappings().first()
+
+    if result is None:
+        return {
+            "error": "Transaction not found"
+        }
+
+    transaction = dict(result)
+
+    transaction["id"] = str(transaction["id"])
+    transaction["listing_id"] = str(transaction["listing_id"])
+    transaction["offer_id"] = str(transaction["offer_id"])
+    transaction["farmer_id"] = str(transaction["farmer_id"])
+    transaction["buyer_id"] = str(transaction["buyer_id"])
+
+    transaction["created_at"] = (
+        transaction["created_at"].isoformat()
+        if transaction["created_at"]
+        else None
+    )
+
+    transaction["updated_at"] = (
+        transaction["updated_at"].isoformat()
+        if transaction["updated_at"]
+        else None
+    )
+
+    return transaction
