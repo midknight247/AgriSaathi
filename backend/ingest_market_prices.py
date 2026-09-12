@@ -1,13 +1,29 @@
-import csv
+import os
 from datetime import datetime
-from pathlib import Path
 
+import requests
+from dotenv import load_dotenv
 from sqlalchemy import text
 
 from database import SessionLocal
+import subprocess
+import json
+
+load_dotenv()
 
 
-CSV_FILE = Path(__file__).parent / "sample_market_prices.csv"
+API_KEY = os.getenv("DATA_GOV_API_KEY")
+
+if not API_KEY:
+    raise RuntimeError(
+        "DATA_GOV_API_KEY is not configured in .env"
+    )
+
+
+API_URL = (
+    "https://api.data.gov.in/resource/"
+    "9ef84268-d588-465a-a308-a864a43d0070"
+)
 
 
 UPSERT_SQL = text(
@@ -55,10 +71,8 @@ UPSERT_SQL = text(
 )
 
 
-def parse_price(value: str) -> float:
-    value = value.strip()
-
-    if not value:
+def parse_price(value):
+    if value is None or str(value).strip() == "":
         raise ValueError("Price cannot be empty")
 
     price = float(value)
@@ -69,85 +83,121 @@ def parse_price(value: str) -> float:
     return price
 
 
+def parse_date(value):
+    return datetime.strptime(
+        value.strip(),
+        "%d/%m/%Y"
+    ).date()
+
+
 def main():
-    if not CSV_FILE.exists():
-        raise FileNotFoundError(
-            f"CSV file not found: {CSV_FILE}"
-        )
+    print("Fetching market-price data from data.gov.in...")
+
+    params = {
+    "api-key": API_KEY,
+    "format": "json",
+    "limit": 100,
+    "filters[state]": "Maharashtra",
+    }
+
+    query = (
+    f"{API_URL}"
+    f"?api-key={API_KEY}"
+    f"&format=json"
+    f"&limit={params['limit']}"
+    f"&filters[state]=Maharashtra"
+)
+
+    result = subprocess.run(
+    [
+        "powershell",
+        "-Command",
+        f"Invoke-RestMethod -Uri '{query}' | ConvertTo-Json -Depth 10"
+    ],
+    capture_output=True,
+    text=True,
+    check=True
+)
+
+    data = json.loads(result.stdout)
+
+    records = data.get("records", [])
+
+    print(f"Records received: {len(records)}")
+
+    if not records:
+        print("No records received.")
+        return
 
     inserted_or_updated = 0
+    skipped = 0
 
-    with CSV_FILE.open(
-        mode="r",
-        encoding="utf-8-sig",
-        newline=""
-    ) as file:
-        reader = csv.DictReader(file)
+    with SessionLocal() as db:
 
-        required_columns = {
-            "State",
-            "District",
-            "Market",
-            "Commodity",
-            "Variety",
-            "Arrival Date",
-            "Min X0020 Price",
-            "Max X0020 Price",
-            "Modal X0020 Price",
-        }
+        for record_number, record in enumerate(records, start=1):
+            try:
+                crop_name = (
+                    str(record.get("commodity") or "").strip()
+                )
 
-        missing_columns = required_columns - set(reader.fieldnames or [])
+                variety = (
+                    str(record.get("variety") or "").strip()
+                    or "Other"
+                )
 
-        if missing_columns:
-            raise ValueError(
-                f"Missing CSV columns: {sorted(missing_columns)}"
-            )
+                market_name = (
+                    str(record.get("market") or "").strip()
+                )
 
-        with SessionLocal() as db:
-            for row_number, row in enumerate(reader, start=2):
-                crop_name = row["Commodity"].strip()
-                variety = row["Variety"].strip() or "Other"
-                market_name = row["Market"].strip()
-                district = row["District"].strip()
-                state = row["State"].strip()
+                district = (
+                    str(record.get("district") or "").strip()
+                )
+
+                state = (
+                    str(record.get("state") or "").strip()
+                )
+
+                arrival_date = (
+                    str(record.get("arrival_date") or "").strip()
+                )
 
                 if not crop_name:
-                    raise ValueError(
-                        f"Row {row_number}: Commodity is empty"
-                    )
+                    raise ValueError("Commodity is empty")
 
                 if not market_name:
-                    raise ValueError(
-                        f"Row {row_number}: Market is empty"
-                    )
+                    raise ValueError("Market is empty")
 
                 if not district:
-                    raise ValueError(
-                        f"Row {row_number}: District is empty"
-                    )
+                    raise ValueError("District is empty")
 
                 if not state:
-                    raise ValueError(
-                        f"Row {row_number}: State is empty"
-                    )
+                    raise ValueError("State is empty")
 
-                price_date = datetime.strptime(
-                    row["Arrival Date"].strip(),
-                    "%d/%m/%Y"
-                ).date()
+                if not arrival_date:
+                    raise ValueError("Arrival date is empty")
 
-                min_price = parse_price(row["Min X0020 Price"])
-                max_price = parse_price(row["Max X0020 Price"])
-                modal_price = parse_price(row["Modal X0020 Price"])
+                price_date = parse_date(arrival_date)
+
+                min_price = parse_price(
+                    record.get("min_price")
+                )
+
+                max_price = parse_price(
+                    record.get("max_price")
+                )
+
+                modal_price = parse_price(
+                    record.get("modal_price")
+                )
 
                 if min_price > max_price:
                     raise ValueError(
-                        f"Row {row_number}: Minimum price is greater than maximum price"
+                        "Minimum price is greater than maximum price"
                     )
 
                 if not min_price <= modal_price <= max_price:
                     raise ValueError(
-                        f"Row {row_number}: Modal price is outside the minimum and maximum range"
+                        "Modal price is outside the minimum and maximum range"
                     )
 
                 db.execute(
@@ -167,12 +217,22 @@ def main():
 
                 inserted_or_updated += 1
 
-            db.commit()
+            except Exception as record_error:
+                skipped += 1
+
+                print(
+                    f"Skipping record {record_number}: "
+                    f"{record_error}"
+                )
+
+        db.commit()
 
     print(
         f"Successfully inserted or updated "
         f"{inserted_or_updated} market-price rows."
     )
+
+    print(f"Skipped: {skipped}")
 
 
 if __name__ == "__main__":

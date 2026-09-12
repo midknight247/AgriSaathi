@@ -1,17 +1,114 @@
-from fastapi import Depends, FastAPI, Query
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+import uuid
+from fastapi import FastAPI, Depends, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 from decimal import Decimal
+from passlib.context import CryptContext
+from jose import JWTError, jwt
+from datetime import datetime, timedelta, timezone
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+SECRET_KEY = os.getenv("SECRET_KEY")
+
+if not SECRET_KEY:
+    raise RuntimeError("SECRET_KEY is not configured")
+
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60
+
+def hash_password(password: str) -> str:
+    return pwd_context.hash(password)
+
+
+def verify_password(password: str, password_hash: str) -> bool:
+    return pwd_context.verify(password, password_hash)
 
 from database import get_db
+
+security = HTTPBearer()
+
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+):
+    token = credentials.credentials
+
+    try:
+        payload = jwt.decode(
+            token,
+            SECRET_KEY,
+            algorithms=[ALGORITHM]
+        )
+
+        user_id = payload.get("sub")
+        role = payload.get("role")
+
+        if user_id is None or role is None:
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid authentication token"
+            )
+
+    except JWTError:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired authentication token"
+        )
+
+    user = db.execute(
+        text("""
+            SELECT
+                id,
+                role,
+                full_name,
+                phone_number,
+                email,
+                is_active
+            FROM users
+            WHERE id = :user_id
+        """),
+        {"user_id": user_id}
+    ).mappings().first()
+
+    if user is None:
+        raise HTTPException(
+            status_code=401,
+            detail="User not found"
+        )
+
+    if not user["is_active"]:
+        raise HTTPException(
+            status_code=403,
+            detail="User account is inactive"
+        )
+
+    return dict(user)
 
 
 app = FastAPI(title="AgriSaathi API")
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 class ListingCreate(BaseModel):
-    farmer_id: str
     crop_name: str
     variety: str | None = None
     description: str | None = None
@@ -20,14 +117,246 @@ class ListingCreate(BaseModel):
     pickup_district: str
     pickup_village: str
 
-
 class OfferCreate(BaseModel):
     listing_id: str
-    buyer_id: str
     offered_price_per_kg: float
     offered_quantity_kg: float
     message: str | None = None
 
+class UserCreate(BaseModel):
+    role: str
+    full_name: str
+    phone_number: str = Field(pattern=r"^[6-9][0-9]{9}$")
+    password: str = Field(min_length=8)
+    email: str | None = None
+    village: str | None = None
+    district: str | None = None
+    state: str | None = None
+    organization_name: str | None = None
+
+
+class UserLogin(BaseModel):
+    phone_number: str = Field(pattern=r"^[6-9][0-9]{9}$")
+    password: str
+
+
+@app.post("/register")
+def register_user(user: UserCreate, db: Session = Depends(get_db)):
+    if user.role not in ["farmer", "buyer"]:
+        raise HTTPException(
+            status_code=400,
+            detail="Role must be farmer or buyer"
+        )
+
+    existing_user = db.execute(
+        text("""
+            SELECT id
+            FROM users
+            WHERE phone_number = :phone_number
+        """),
+        {"phone_number": user.phone_number}
+    ).fetchone()
+
+    if existing_user:
+        raise HTTPException(
+            status_code=400,
+            detail="Phone number already registered"
+        )
+
+    password_hash = hash_password(user.password)
+
+    new_user_id = str(uuid.uuid4())
+
+    db.execute(
+        text("""
+            INSERT INTO users (
+                id,
+                role,
+                full_name,
+                phone_number,
+                password_hash,
+                email,
+                village,
+                district,
+                state,
+                organization_name,
+                is_demo_account,
+                is_active
+            )
+            VALUES (
+                :id,
+                :role,
+                :full_name,
+                :phone_number,
+                :password_hash,
+                :email,
+                :village,
+                :district,
+                :state,
+                :organization_name,
+                false,
+                true
+            )
+        """),
+        {
+            "id": new_user_id,
+            "role": user.role,
+            "full_name": user.full_name,
+            "phone_number": user.phone_number,
+            "password_hash": password_hash,
+            "email": user.email,
+            "village": user.village,
+            "district": user.district,
+            "state": user.state,
+            "organization_name": user.organization_name
+        }
+    )
+
+    db.commit()
+
+    return {
+        "message": "Registration successful",
+        "user": {
+            "id": new_user_id,
+            "role": user.role,
+            "full_name": user.full_name,
+            "phone_number": user.phone_number,
+            "email": user.email
+        }
+    }
+
+
+@app.post("/login")
+def login_user(
+    user: UserLogin,
+    db: Session = Depends(get_db)
+):
+    result = db.execute(
+        text("""
+            SELECT
+                id,
+                role,
+                full_name,
+                phone_number,
+                password_hash,
+                email,
+                is_active
+            FROM users
+            WHERE phone_number = :phone_number
+        """),
+        {
+            "phone_number": user.phone_number
+        }
+    )
+
+    existing_user = result.mappings().first()
+
+    if not existing_user:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid phone number or password"
+        )
+
+    if not verify_password(
+        user.password,
+        existing_user["password_hash"]
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid phone number or password"
+        )
+
+    if not existing_user["is_active"]:
+        raise HTTPException(
+            status_code=403,
+            detail="User account is inactive"
+        )
+
+    expire = datetime.now(timezone.utc) + timedelta(
+        minutes=ACCESS_TOKEN_EXPIRE_MINUTES
+    )
+
+    token_data = {
+        "sub": str(existing_user["id"]),
+        "role": existing_user["role"],
+        "exp": expire
+    }
+
+    access_token = jwt.encode(
+        token_data,
+        SECRET_KEY,
+        algorithm=ALGORITHM
+    )
+
+    return {
+        "message": "Login successful",
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {
+            "id": str(existing_user["id"]),
+            "role": existing_user["role"],
+            "full_name": existing_user["full_name"],
+            "phone_number": existing_user["phone_number"],
+            "email": existing_user["email"]
+        }
+    }
+
+class UserLogin(BaseModel):
+    phone_number: str = Field(pattern=r"^[6-9][0-9]{9}$")
+    password: str
+
+@app.get("/admin/users")
+def get_all_users(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user["role"] != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Only admins can view users"
+        )
+
+    query = text(
+        """
+        SELECT
+            id,
+            role,
+            full_name,
+            phone_number,
+            email,
+            village,
+            district,
+            state,
+            organization_name,
+            is_demo_account,
+            is_active,
+            created_at
+        FROM users
+        ORDER BY created_at DESC
+        """
+    )
+
+    results = db.execute(query).mappings().all()
+
+    users = []
+
+    for row in results:
+        user = dict(row)
+
+        user["id"] = str(user["id"])
+
+        user["created_at"] = (
+            user["created_at"].isoformat()
+            if user["created_at"]
+            else None
+        )
+
+        users.append(user)
+
+    return {
+        "count": len(users),
+        "users": users
+    }
 
 @app.get("/")
 def root():
@@ -35,15 +364,6 @@ def root():
         "message": "AgriSaathi backend is running"
     }
 
-
-@app.get("/db-test")
-def database_test(db: Session = Depends(get_db)):
-    result = db.execute(text("SELECT 1"))
-
-    return {
-        "database": "connected",
-        "result": result.scalar()
-    }
 
 
 @app.get("/listings")
@@ -88,12 +408,78 @@ def get_listings(db: Session = Depends(get_db)):
         "listings": listings
     }
 
+@app.get("/my-listings")
+def get_my_listings(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user["role"] != "farmer":
+        raise HTTPException(
+            status_code=403,
+            detail="Only farmers can view their listings"
+        )
+
+    query = text("""
+        SELECT
+            id,
+            farmer_id,
+            crop_name,
+            variety,
+            description,
+            quantity_kg,
+            expected_price_per_kg,
+            harvest_date,
+            pickup_district,
+            pickup_village,
+            listing_status,
+            created_at
+        FROM produce_listings
+        WHERE farmer_id = :farmer_id
+        ORDER BY created_at DESC
+    """)
+
+    result = db.execute(
+        query,
+        {"farmer_id": str(current_user["id"])}
+    )
+
+    listings = []
+
+    for row in result.mappings():
+        listing = dict(row)
+
+        listing["id"] = str(listing["id"])
+        listing["farmer_id"] = str(listing["farmer_id"])
+
+        if listing["harvest_date"]:
+            listing["harvest_date"] = (
+                listing["harvest_date"].isoformat()
+            )
+
+        if listing["created_at"]:
+            listing["created_at"] = (
+                listing["created_at"].isoformat()
+            )
+
+        listings.append(listing)
+
+    return {
+        "count": len(listings),
+        "listings": listings
+    }
 
 @app.post("/listings")
 def create_listing(
     listing: ListingCreate,
+    current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    if current_user["role"] != "farmer":
+        raise HTTPException(
+            status_code=403,
+            detail="Only farmers can create listings"
+        )
+
     query = text("""
         INSERT INTO produce_listings (
             farmer_id,
@@ -122,7 +508,16 @@ def create_listing(
 
     result = db.execute(
         query,
-        listing.model_dump()
+        {
+            "farmer_id": str(current_user["id"]),
+            "crop_name": listing.crop_name,
+            "variety": listing.variety,
+            "description": listing.description,
+            "quantity_kg": listing.quantity_kg,
+            "expected_price_per_kg": listing.expected_price_per_kg,
+            "pickup_district": listing.pickup_district,
+            "pickup_village": listing.pickup_village
+        }
     )
 
     new_listing_id = result.scalar_one()
@@ -134,12 +529,18 @@ def create_listing(
         "listing_id": str(new_listing_id)
     }
 
-
 @app.post("/offers")
 def create_offer(
     offer: OfferCreate,
+    current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    if current_user["role"] != "buyer":
+        raise HTTPException(
+            status_code=403,
+            detail="Only buyers can submit offers"
+        )
+
     listing_query = text("""
         SELECT
             id,
@@ -150,18 +551,22 @@ def create_offer(
 
     listing = db.execute(
         listing_query,
-        {"listing_id": offer.listing_id}
+        {
+            "listing_id": offer.listing_id
+        }
     ).mappings().first()
 
     if listing is None:
-        return {
-            "error": "Listing not found"
-        }
+        raise HTTPException(
+            status_code=404,
+            detail="Listing not found"
+        )
 
     if listing["listing_status"] != "active":
-        return {
-            "error": "This listing is not active"
-        }
+        raise HTTPException(
+            status_code=400,
+            detail="This listing is not active"
+        )
 
     offer_query = text("""
         INSERT INTO buyer_offers (
@@ -185,7 +590,13 @@ def create_offer(
 
     result = db.execute(
         offer_query,
-        offer.model_dump()
+        {
+            "listing_id": offer.listing_id,
+            "buyer_id": str(current_user["id"]),
+            "offered_price_per_kg": offer.offered_price_per_kg,
+            "offered_quantity_kg": offer.offered_quantity_kg,
+            "message": offer.message
+        }
     )
 
     new_offer_id = result.scalar_one()
@@ -197,12 +608,103 @@ def create_offer(
         "offer_id": str(new_offer_id)
     }
 
+@app.get("/my-offers")
+def get_my_offers(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user["role"] != "buyer":
+        raise HTTPException(
+            status_code=403,
+            detail="Only buyers can view their offers"
+        )
+
+    buyer_id = str(current_user["id"])
+
+    query = text("""
+        SELECT
+            o.id,
+            o.listing_id,
+            o.buyer_id,
+            o.offered_price_per_kg,
+            o.offered_quantity_kg,
+            o.offer_status,
+            o.message,
+            o.created_at,
+            o.updated_at,
+            l.crop_name,
+            l.variety,
+            l.pickup_district,
+            l.pickup_village
+        FROM buyer_offers o
+        JOIN produce_listings l
+            ON o.listing_id = l.id
+        WHERE o.buyer_id = :buyer_id
+        ORDER BY o.created_at DESC
+    """)
+
+    results = db.execute(
+        query,
+        {"buyer_id": buyer_id}
+    ).mappings().all()
+
+    offers = []
+
+    for row in results:
+        offer = dict(row)
+
+        offer["id"] = str(offer["id"])
+        offer["listing_id"] = str(offer["listing_id"])
+        offer["buyer_id"] = str(offer["buyer_id"])
+
+        offer["created_at"] = (
+            offer["created_at"].isoformat()
+            if offer["created_at"]
+            else None
+        )
+
+        offer["updated_at"] = (
+            offer["updated_at"].isoformat()
+            if offer["updated_at"]
+            else None
+        )
+
+        offers.append(offer)
+
+    return {
+        "count": len(offers),
+        "offers": offers
+    }
 
 @app.get("/listings/{listing_id}/offers")
 def get_listing_offers(
     listing_id: str,
+    current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    listing_query = text("""
+        SELECT id, farmer_id
+        FROM produce_listings
+        WHERE id = :listing_id
+    """)
+
+    listing = db.execute(
+        listing_query,
+        {"listing_id": listing_id}
+    ).mappings().first()
+
+    if listing is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Listing not found"
+        )
+
+    if str(current_user["id"]) != str(listing["farmer_id"]):
+        raise HTTPException(
+            status_code=403,
+            detail="You do not own this listing"
+        )
+
     query = text("""
         SELECT
             id,
@@ -246,10 +748,10 @@ def get_listing_offers(
         "offers": offers
     }
 
-
 @app.post("/offers/{offer_id}/accept")
 def accept_offer(
     offer_id: str,
+    current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     try:
@@ -304,6 +806,13 @@ def accept_offer(
             return {
                 "error": "Listing is no longer active"
             }
+
+        if str(current_user["id"]) != str(listing["farmer_id"]):
+            db.rollback()
+            raise HTTPException(
+                status_code=403,
+                detail="You do not own this listing"
+            )
 
         # Step 3: Lock the specific offer after the listing lock.
         # Re-read the offer because its status may have changed
@@ -436,16 +945,115 @@ def accept_offer(
             "status": "confirmed"
         }
 
-    except Exception:
+    except HTTPException:
         db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        print("Accept offer error:", e)
+        return {"error": "Could not accept offer"}
 
-        return {
-            "error": "Could not accept offer"
-        }
+@app.get("/transactions")
+def get_my_transactions(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    user_id = str(current_user["id"])
+    role = current_user["role"]
+
+    if role == "buyer":
+        query = text("""
+            SELECT
+                t.id,
+                t.listing_id,
+                t.offer_id,
+                t.farmer_id,
+                t.buyer_id,
+                pl.crop_name,
+                pl.variety,
+                t.final_price_per_kg,
+                t.final_quantity_kg,
+                t.total_amount,
+                t.transaction_status,
+                t.payment_status,
+                t.created_at,
+                t.updated_at
+            FROM transactions t
+            JOIN produce_listings pl
+                ON t.listing_id = pl.id
+            WHERE t.buyer_id = :user_id
+            ORDER BY t.created_at DESC
+        """)
+
+    elif role == "farmer":
+        query = text("""
+            SELECT
+                t.id,
+                t.listing_id,
+                t.offer_id,
+                t.farmer_id,
+                t.buyer_id,
+                pl.crop_name,
+                pl.variety,
+                t.final_price_per_kg,
+                t.final_quantity_kg,
+                t.total_amount,
+                t.transaction_status,
+                t.payment_status,
+                t.created_at,
+                t.updated_at
+            FROM transactions t
+            JOIN produce_listings pl
+                ON t.listing_id = pl.id
+            WHERE t.farmer_id = :user_id
+            ORDER BY t.created_at DESC
+        """)
+
+    else:
+        raise HTTPException(
+            status_code=403,
+            detail="Only farmers and buyers can view transactions"
+        )
+
+    results = db.execute(
+        query,
+        {"user_id": user_id}
+    ).mappings().all()
+
+    transactions = []
+
+    for row in results:
+        transaction = dict(row)
+
+        transaction["id"] = str(transaction["id"])
+        transaction["listing_id"] = str(transaction["listing_id"])
+        transaction["offer_id"] = str(transaction["offer_id"])
+        transaction["farmer_id"] = str(transaction["farmer_id"])
+        transaction["buyer_id"] = str(transaction["buyer_id"])
+
+        transaction["created_at"] = (
+            transaction["created_at"].isoformat()
+            if transaction["created_at"]
+            else None
+        )
+
+        transaction["updated_at"] = (
+            transaction["updated_at"].isoformat()
+            if transaction["updated_at"]
+            else None
+        )
+
+        transactions.append(transaction)
+
+    return {
+        "count": len(transactions),
+        "transactions": transactions
+    }
 
 @app.get("/transactions/{transaction_id}")
 def get_transaction(
     transaction_id: str,
+    current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     query = text("""
@@ -472,11 +1080,25 @@ def get_transaction(
     ).mappings().first()
 
     if result is None:
-        return {
-            "error": "Transaction not found"
-        }
+        raise HTTPException(
+            status_code=404,
+            detail="Transaction not found"
+        )
 
     transaction = dict(result)
+
+    # Only the farmer or buyer involved in the transaction
+    # can view it.
+    user_id = str(current_user["id"])
+
+    if (
+        user_id != str(transaction["farmer_id"])
+        and user_id != str(transaction["buyer_id"])
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="You do not have access to this transaction"
+        )
 
     transaction["id"] = str(transaction["id"])
     transaction["listing_id"] = str(transaction["listing_id"])
@@ -507,6 +1129,31 @@ def get_market_prices(
     to_date: str | None = None,
     db: Session = Depends(get_db)
 ):
+    # Validate date filters before sending them to PostgreSQL.
+    if from_date:
+        try:
+            datetime.strptime(from_date, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail="from_date must use YYYY-MM-DD format"
+            )
+
+    if to_date:
+        try:
+            datetime.strptime(to_date, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail="to_date must use YYYY-MM-DD format"
+            )
+
+    if from_date and to_date and from_date > to_date:
+        raise HTTPException(
+            status_code=400,
+            detail="from_date cannot be later than to_date"
+        )
+
     query = """
         SELECT
             id,
@@ -555,8 +1202,6 @@ def get_market_prices(
 
     return [dict(row._mapping) for row in result]
 
-
-
 class LogisticsProviderCreate(BaseModel):
     provider_name: str
     phone_number: str = Field(pattern=r"^[6-9][0-9]{9}$")
@@ -566,12 +1211,31 @@ class LogisticsProviderCreate(BaseModel):
     capacity_kg: Decimal | None = None
     estimated_cost: Decimal | None = None
 
+class UserCreate(BaseModel):
+    role: str
+    full_name: str
+    phone_number: str = Field(pattern=r"^[6-9][0-9]{9}$")
+    password: str = Field(min_length=8)
+    email: str | None = None
+    village: str | None = None
+    district: str | None = None
+    state: str | None = None
+    organization_name: str | None = None
+
 
 @app.post("/logistics-providers")
 def create_logistics_provider(
     provider: LogisticsProviderCreate,
+    current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    # Only administrators can create logistics-provider records.
+    if current_user["role"] != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Only administrators can create logistics providers"
+        )
+
     allowed_vehicle_types = {
         "mini_truck",
         "tempo",
@@ -583,16 +1247,25 @@ def create_logistics_provider(
         provider.vehicle_type is not None
         and provider.vehicle_type not in allowed_vehicle_types
     ):
-        return {
-            "message": "Invalid vehicle_type",
-            "allowed_vehicle_types": sorted(allowed_vehicle_types),
-        }
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "Invalid vehicle_type",
+                "allowed_vehicle_types": sorted(allowed_vehicle_types),
+            },
+        )
 
     if provider.capacity_kg is not None and provider.capacity_kg <= 0:
-        return {"message": "capacity_kg must be greater than zero"}
+        raise HTTPException(
+            status_code=400,
+            detail="capacity_kg must be greater than zero"
+        )
 
     if provider.estimated_cost is not None and provider.estimated_cost < 0:
-        return {"message": "estimated_cost cannot be negative"}
+        raise HTTPException(
+            status_code=400,
+            detail="estimated_cost cannot be negative"
+        )
 
     query = text(
         """
@@ -647,6 +1320,7 @@ def create_logistics_provider(
     )
 
     provider_record = dict(result.fetchone()._mapping)
+
     db.commit()
 
     return provider_record
@@ -659,16 +1333,107 @@ class PickupRequestCreate(BaseModel):
     pickup_date: str | None = None
     notes: str | None = None
 
+@app.get("/pickup-requests")
+def get_pickup_requests(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    user_id = str(current_user["id"])
+    role = current_user["role"]
+
+    if role not in {"farmer", "buyer"}:
+        raise HTTPException(
+            status_code=403,
+            detail="Only farmers and buyers can view pickup requests"
+        )
+
+    query = text(
+        """
+        SELECT
+            pr.id,
+            pr.transaction_id,
+            pr.logistics_provider_id,
+            lp.provider_name AS logistics_provider_name,
+            pr.pickup_location,
+            pr.delivery_location,
+            pr.pickup_date,
+            pr.request_status,
+            pr.notes,
+            pr.created_at,
+            pr.updated_at,
+            t.farmer_id,
+            t.buyer_id
+        FROM pickup_requests pr
+        JOIN transactions t 
+            ON t.id = pr.transaction_id
+        LEFT JOIN logistics_providers lp
+            ON lp.id = pr.logistics_provider_id
+        WHERE
+            t.farmer_id = :user_id
+            OR t.buyer_id = :user_id
+        ORDER BY pr.created_at DESC
+        """
+    )
+
+    results = db.execute(
+        query,
+        {"user_id": user_id}
+    ).mappings().all()
+
+    pickup_requests = []
+
+    for row in results:
+        request = dict(row)
+
+        request["id"] = str(request["id"])
+        request["transaction_id"] = str(request["transaction_id"])
+        request["logistics_provider_id"] = (
+            str(request["logistics_provider_id"])
+            if request["logistics_provider_id"]
+            else None
+        )
+        request["farmer_id"] = str(request["farmer_id"])
+        request["buyer_id"] = str(request["buyer_id"])
+
+        request["pickup_date"] = (
+            request["pickup_date"].isoformat()
+            if request["pickup_date"]
+            else None
+        )
+
+        request["created_at"] = (
+            request["created_at"].isoformat()
+            if request["created_at"]
+            else None
+        )
+
+        request["updated_at"] = (
+            request["updated_at"].isoformat()
+            if request["updated_at"]
+            else None
+        )
+
+        pickup_requests.append(request)
+
+    return {
+        "count": len(pickup_requests),
+        "pickup_requests": pickup_requests
+    }
 
 @app.post("/pickup-requests")
 def create_pickup_request(
     pickup: PickupRequestCreate,
+    current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    # 1. Get transaction and verify that the logged-in user
+    #    is either the farmer or buyer involved in it.
     transaction_query = text(
         """
         SELECT
             id,
+            farmer_id,
+            buyer_id,
             transaction_status,
             final_quantity_kg
         FROM transactions
@@ -679,16 +1444,33 @@ def create_pickup_request(
     transaction_result = db.execute(
         transaction_query,
         {"transaction_id": pickup.transaction_id}
-    ).fetchone()
+    ).mappings().first()
 
     if not transaction_result:
-        return {"message": "Transaction not found"}
+        raise HTTPException(
+            status_code=404,
+            detail="Transaction not found"
+        )
 
-    if transaction_result.transaction_status != "confirmed":
-        return {
-            "message": "Pickup can only be requested for a confirmed transaction"
-        }
+    user_id = str(current_user["id"])
 
+    if (
+        user_id != str(transaction_result["farmer_id"])
+        and user_id != str(transaction_result["buyer_id"])
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="You do not have access to this transaction"
+        )
+
+    # 2. Pickup is allowed only for confirmed transactions.
+    if transaction_result["transaction_status"] != "confirmed":
+        raise HTTPException(
+            status_code=400,
+            detail="Pickup can only be requested for a confirmed transaction"
+        )
+
+    # 3. Verify logistics provider.
     provider_query = text(
         """
         SELECT
@@ -703,22 +1485,30 @@ def create_pickup_request(
     provider_result = db.execute(
         provider_query,
         {"provider_id": pickup.logistics_provider_id}
-    ).fetchone()
+    ).mappings().first()
 
     if not provider_result:
-        return {"message": "Logistics provider not found"}
+        raise HTTPException(
+            status_code=404,
+            detail="Logistics provider not found"
+        )
 
-    if not provider_result.is_active:
-        return {"message": "Logistics provider is inactive"}
+    if not provider_result["is_active"]:
+        raise HTTPException(
+            status_code=400,
+            detail="Logistics provider is inactive"
+        )
 
     if (
-        provider_result.capacity_kg is not None
-        and provider_result.capacity_kg < transaction_result.final_quantity_kg
+        provider_result["capacity_kg"] is not None
+        and provider_result["capacity_kg"] < transaction_result["final_quantity_kg"]
     ):
-        return {
-            "message": "Logistics provider capacity is insufficient"
-        }
+        raise HTTPException(
+            status_code=400,
+            detail="Logistics provider capacity is insufficient"
+        )
 
+    # 4. Prevent duplicate pickup requests.
     existing_query = text(
         """
         SELECT id
@@ -738,6 +1528,7 @@ def create_pickup_request(
             "pickup_request_id": str(existing_request.id),
         }
 
+    # 5. Create pickup request.
     insert_query = text(
         """
         INSERT INTO pickup_requests (
@@ -784,6 +1575,7 @@ def create_pickup_request(
     )
 
     pickup_record = dict(result.fetchone()._mapping)
+
     db.commit()
 
     return pickup_record
@@ -796,6 +1588,7 @@ class PickupStatusUpdate(BaseModel):
 def update_pickup_status(
     pickup_request_id: str,
     status_update: PickupStatusUpdate,
+    current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     allowed_statuses = {
@@ -806,30 +1599,62 @@ def update_pickup_status(
     }
 
     if status_update.request_status not in allowed_statuses:
-        return {
-            "message": "Invalid request_status",
-            "allowed_statuses": sorted(allowed_statuses),
-        }
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "Invalid request_status",
+                "allowed_statuses": sorted(allowed_statuses),
+            },
+        )
 
+    # Get pickup request and the transaction participants.
     query = text(
         """
         SELECT
-            id,
-            request_status
-        FROM pickup_requests
-        WHERE id = :pickup_request_id
+            pr.id,
+            pr.transaction_id,
+            pr.logistics_provider_id,
+            pr.request_status,
+            pr.pickup_location,
+            pr.delivery_location,
+            pr.pickup_date,
+            pr.notes,
+            pr.created_at,
+            pr.updated_at,
+            t.farmer_id,
+            t.buyer_id
+        FROM pickup_requests pr
+        JOIN transactions t
+            ON t.id = pr.transaction_id
+        WHERE pr.id = :pickup_request_id
         """
     )
 
     result = db.execute(
         query,
         {"pickup_request_id": pickup_request_id}
-    ).fetchone()
+    ).mappings().first()
 
     if not result:
-        return {"message": "Pickup request not found"}
+        raise HTTPException(
+            status_code=404,
+            detail="Pickup request not found"
+        )
 
-    current_status = result.request_status
+    # Only the farmer or buyer involved in the transaction
+    # can update the pickup status.
+    user_id = str(current_user["id"])
+
+    if (
+        user_id != str(result["farmer_id"])
+        and user_id != str(result["buyer_id"])
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="You do not have access to this pickup request"
+        )
+
+    current_status = result["request_status"]
     new_status = status_update.request_status
 
     allowed_transitions = {
@@ -840,12 +1665,13 @@ def update_pickup_status(
     }
 
     if new_status not in allowed_transitions[current_status]:
-        return {
-            "message": (
+        raise HTTPException(
+            status_code=400,
+            detail=(
                 f"Cannot change pickup request from "
                 f"'{current_status}' to '{new_status}'"
-            )
-        }
+            ),
+        )
 
     update_query = text(
         """
@@ -877,6 +1703,7 @@ def update_pickup_status(
     )
 
     pickup_record = dict(updated_result.fetchone()._mapping)
+
     db.commit()
 
     return pickup_record
@@ -889,33 +1716,57 @@ class PickupProviderUpdate(BaseModel):
 def assign_logistics_provider(
     pickup_request_id: str,
     provider_update: PickupProviderUpdate,
+    current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    # Get pickup request together with the transaction participants.
     pickup_query = text(
         """
         SELECT
-            id,
-            transaction_id,
-            logistics_provider_id,
-            request_status
-        FROM pickup_requests
-        WHERE id = :pickup_request_id
+            pr.id,
+            pr.transaction_id,
+            pr.logistics_provider_id,
+            pr.request_status,
+            t.farmer_id,
+            t.buyer_id
+        FROM pickup_requests pr
+        JOIN transactions t
+            ON t.id = pr.transaction_id
+        WHERE pr.id = :pickup_request_id
         """
     )
 
     pickup_result = db.execute(
         pickup_query,
         {"pickup_request_id": pickup_request_id}
-    ).fetchone()
+    ).mappings().first()
 
     if not pickup_result:
-        return {"message": "Pickup request not found"}
+        raise HTTPException(
+            status_code=404,
+            detail="Pickup request not found"
+        )
 
-    if pickup_result.request_status in {"completed", "cancelled"}:
-        return {
-            "message": "Cannot reassign a completed or cancelled pickup request"
-        }
+    # Only the farmer or buyer involved in the transaction
+    # can assign/reassign the logistics provider.
+    user_id = str(current_user["id"])
 
+    if (
+        user_id != str(pickup_result["farmer_id"])
+        and user_id != str(pickup_result["buyer_id"])
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="You do not have access to this pickup request"
+        )
+
+    if pickup_result["request_status"] in {"completed", "cancelled"}:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot reassign a completed or cancelled pickup request"
+        )
+
+    # Verify the new logistics provider.
     provider_query = text(
         """
         SELECT
@@ -931,14 +1782,21 @@ def assign_logistics_provider(
     provider_result = db.execute(
         provider_query,
         {"provider_id": provider_update.logistics_provider_id}
-    ).fetchone()
+    ).mappings().first()
 
     if not provider_result:
-        return {"message": "Logistics provider not found"}
+        raise HTTPException(
+            status_code=404,
+            detail="Logistics provider not found"
+        )
 
-    if not provider_result.is_active:
-        return {"message": "Logistics provider is inactive"}
+    if not provider_result["is_active"]:
+        raise HTTPException(
+            status_code=400,
+            detail="Logistics provider is inactive"
+        )
 
+    # Get transaction quantity for capacity validation.
     transaction_query = text(
         """
         SELECT final_quantity_kg
@@ -949,20 +1807,26 @@ def assign_logistics_provider(
 
     transaction_result = db.execute(
         transaction_query,
-        {"transaction_id": pickup_result.transaction_id}
-    ).fetchone()
+        {"transaction_id": pickup_result["transaction_id"]}
+    ).mappings().first()
 
     if not transaction_result:
-        return {"message": "Linked transaction not found"}
+        raise HTTPException(
+            status_code=404,
+            detail="Linked transaction not found"
+        )
 
     if (
-        provider_result.capacity_kg is not None
-        and provider_result.capacity_kg < transaction_result.final_quantity_kg
+        provider_result["capacity_kg"] is not None
+        and provider_result["capacity_kg"]
+        < transaction_result["final_quantity_kg"]
     ):
-        return {
-            "message": "Logistics provider capacity is insufficient"
-        }
+        raise HTTPException(
+            status_code=400,
+            detail="Logistics provider capacity is insufficient"
+        )
 
+    # Assign the provider.
     update_query = text(
         """
         UPDATE pickup_requests
@@ -993,6 +1857,7 @@ def assign_logistics_provider(
     )
 
     pickup_record = dict(updated_result.fetchone()._mapping)
+
     db.commit()
 
     return pickup_record
