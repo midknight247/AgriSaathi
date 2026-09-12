@@ -1350,6 +1350,25 @@ def get_price_intelligence(
                 difference / average_modal_price_per_kg
             ) * 100
 
+        intelligence["price_position"] = None
+
+    if (
+        expected_price_per_kg is not None
+        and average_modal_price_per_kg is not None
+        and average_modal_price_per_kg > 0
+    ):
+        difference_percent = (
+            (expected_price_per_kg - average_modal_price_per_kg)
+            / average_modal_price_per_kg
+        ) * 100
+
+        if difference_percent < -5:
+            intelligence["price_position"] = "below_market"
+        elif difference_percent > 5:
+            intelligence["price_position"] = "above_market"
+        else:
+            intelligence["price_position"] = "near_market"
+
     for row in rows:
         intelligence["markets"].append({
             "market_name": row["market_name"],

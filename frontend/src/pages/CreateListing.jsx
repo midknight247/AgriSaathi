@@ -334,6 +334,18 @@ function CreateListing() {
                     </strong>
                   </div>
                 )}
+                {priceIntelligence.price_position && (
+  <div>
+    <span>Price position</span>
+    <strong>
+      {priceIntelligence.price_position === 'above_market'
+        ? 'Above current market average'
+        : priceIntelligence.price_position === 'below_market'
+        ? 'Below current market average'
+        : 'Near current market average'}
+    </strong>
+  </div>
+)}
               </div>
               {priceIntelligence.top_markets?.length > 0 && (
   <div className="top-markets">
