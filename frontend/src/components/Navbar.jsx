@@ -1,4 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom'
+import ThemeToggle from './ThemeToggle' // Adjust path if ThemeToggle is in another folder
 
 function Navbar() {
   const navigate = useNavigate()
@@ -22,6 +23,8 @@ function Navbar() {
       </div>
 
       <div className="navbar-user">
+        <ThemeToggle />
+
         <span>
           {user.full_name}
         </span>
