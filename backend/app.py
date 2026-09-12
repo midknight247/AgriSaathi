@@ -1202,6 +1202,192 @@ def get_market_prices(
 
     return [dict(row._mapping) for row in result]
 
+@app.get("/price-intelligence")
+def get_price_intelligence(
+    crop_name: str,
+    district: str | None = None,
+    expected_price_per_kg: float | None = None,
+    db: Session = Depends(get_db)
+):
+    crop_name = crop_name.strip()
+
+    if not crop_name:
+        raise HTTPException(
+            status_code=400,
+            detail="crop_name is required"
+        )
+
+    query = """
+        WITH latest_date AS (
+            SELECT MAX(price_date) AS price_date
+            FROM market_prices
+            WHERE LOWER(crop_name) = LOWER(:crop_name)
+        ),
+        current_prices AS (
+            SELECT
+                crop_name,
+                variety,
+                market_name,
+                district,
+                state,
+                price_date,
+                min_price_per_quintal,
+                max_price_per_quintal,
+                modal_price_per_quintal
+            FROM market_prices
+            WHERE LOWER(crop_name) = LOWER(:crop_name)
+              AND price_date = (SELECT price_date FROM latest_date)
+        )
+        SELECT
+            crop_name,
+            variety,
+            market_name,
+            district,
+            state,
+            price_date,
+            min_price_per_quintal,
+            max_price_per_quintal,
+            modal_price_per_quintal
+        FROM current_prices
+    """
+
+    params = {
+        "crop_name": crop_name
+    }
+
+    if district:
+        query += """
+            WHERE LOWER(district) = LOWER(:district)
+        """
+        params["district"] = district.strip()
+
+    query += """
+        ORDER BY modal_price_per_quintal DESC NULLS LAST
+    """
+
+    result = db.execute(text(query), params)
+    rows = [dict(row._mapping) for row in result]
+
+    if not rows:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No current market price data found for {crop_name}"
+        )
+
+    modal_prices = [
+        float(row["modal_price_per_quintal"]) / 100
+        for row in rows
+        if row["modal_price_per_quintal"] is not None
+    ]
+
+    min_prices = [
+        float(row["min_price_per_quintal"]) / 100
+        for row in rows
+        if row["min_price_per_quintal"] is not None
+    ]
+
+    max_prices = [
+        float(row["max_price_per_quintal"]) / 100
+        for row in rows
+        if row["max_price_per_quintal"] is not None
+    ]
+
+    average_modal_price_per_kg = (
+        sum(modal_prices) / len(modal_prices)
+        if modal_prices
+        else None
+    )
+
+    lowest_modal_price_per_kg = (
+        min(modal_prices)
+        if modal_prices
+        else None
+    )
+
+    highest_modal_price_per_kg = (
+        max(modal_prices)
+        if modal_prices
+        else None
+    )
+
+    intelligence = {
+        "crop_name": rows[0]["crop_name"],
+        "latest_date": rows[0]["price_date"],
+        "market_count": len(rows),
+        "reference": "Current mandi modal-price snapshot",
+        "average_modal_price_per_kg": average_modal_price_per_kg,
+        "lowest_modal_price_per_kg": (
+            min(modal_prices) if modal_prices else None
+        ),
+        "highest_modal_price_per_kg": (
+            max(modal_prices) if modal_prices else None
+        ),
+        "lowest_market_range_price_per_kg": (
+            min(min_prices) if min_prices else None
+        ),
+        "highest_market_range_price_per_kg": (
+            max(max_prices) if max_prices else None
+        ),
+        "expected_price_per_kg": expected_price_per_kg,
+        "expected_price_difference_per_kg": None,
+        "expected_price_difference_percent": None,
+        "markets": []
+    }
+
+    if (
+        expected_price_per_kg is not None
+        and average_modal_price_per_kg is not None
+    ):
+        difference = (
+            expected_price_per_kg
+            - average_modal_price_per_kg
+        )
+
+        intelligence["expected_price_difference_per_kg"] = difference
+
+        if average_modal_price_per_kg > 0:
+            intelligence["expected_price_difference_percent"] = (
+                difference / average_modal_price_per_kg
+            ) * 100
+
+    for row in rows:
+        intelligence["markets"].append({
+            "market_name": row["market_name"],
+            "district": row["district"],
+            "state": row["state"],
+            "price_date": row["price_date"],
+            "modal_price_per_kg": (
+                float(row["modal_price_per_quintal"]) / 100
+                if row["modal_price_per_quintal"] is not None
+                else None
+            ),
+            "min_price_per_kg": (
+                float(row["min_price_per_quintal"]) / 100
+                if row["min_price_per_quintal"] is not None
+                else None
+            ),
+            "max_price_per_kg": (
+                float(row["max_price_per_quintal"]) / 100
+                if row["max_price_per_quintal"] is not None
+                else None
+            )
+        })
+
+        intelligence["top_markets"] = [
+        {
+            "market_name": row["market_name"].strip(),
+            "district": row["district"].strip(),
+            "modal_price_per_kg": (
+                float(row["modal_price_per_quintal"]) / 100
+                if row["modal_price_per_quintal"] is not None
+                else None
+            )
+        }
+        for row in rows[:5]
+    ]
+
+    return intelligence
+
 class LogisticsProviderCreate(BaseModel):
     provider_name: str
     phone_number: str = Field(pattern=r"^[6-9][0-9]{9}$")

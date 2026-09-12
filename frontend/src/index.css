@@ -1628,3 +1628,44 @@ select:focus {
     grid-template-columns: 1fr;
   }
 }
+
+.top-markets {
+  margin-top: 22px;
+}
+
+.top-markets h3 {
+  margin-bottom: 12px;
+  font-size: 1rem;
+}
+
+.top-markets-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.top-market-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 12px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.top-market-row span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.top-market-row small {
+  color: #6b7280;
+  font-size: 0.8rem;
+}
+
+.top-market-row strong {
+  white-space: nowrap;
+}

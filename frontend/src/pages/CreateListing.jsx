@@ -14,9 +14,56 @@ function CreateListing() {
   const [pickupDistrict, setPickupDistrict] = useState('')
   const [pickupVillage, setPickupVillage] = useState('')
 
+  const [priceIntelligence, setPriceIntelligence] = useState(null)
+  const [priceIntelligenceError, setPriceIntelligenceError] = useState('')
+  const [loadingPriceIntelligence, setLoadingPriceIntelligence] = useState(false)
+
   const [success, setSuccess] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+
+  async function loadPriceIntelligence() {
+    if (!cropName.trim()) {
+      setPriceIntelligence(null)
+      setPriceIntelligenceError('')
+      return
+    }
+
+    setLoadingPriceIntelligence(true)
+    setPriceIntelligenceError('')
+
+    try {
+      const params = new URLSearchParams({
+        crop_name: cropName.trim(),
+      })
+
+      if (pickupDistrict.trim()) {
+        params.set('district', pickupDistrict.trim())
+      }
+
+      if (expectedPrice) {
+        params.set(
+          'expected_price_per_kg',
+          expectedPrice
+        )
+      }
+
+      const data = await apiRequest(
+        `/price-intelligence?${params.toString()}`
+      )
+
+      setPriceIntelligence(data)
+    } catch (err) {
+      setPriceIntelligence(null)
+      setPriceIntelligenceError(
+        err instanceof Error
+          ? err.message
+          : 'Unable to load current market prices'
+      )
+    } finally {
+      setLoadingPriceIntelligence(false)
+    }
+  }
 
   async function handleSubmit(event) {
     event.preventDefault()
@@ -187,6 +234,19 @@ function CreateListing() {
                   }
                   placeholder="e.g. 25"
                 />
+
+                <button
+                  type="button"
+                  onClick={loadPriceIntelligence}
+                  disabled={
+                    !cropName.trim() ||
+                    loadingPriceIntelligence
+                  }
+                >
+                  {loadingPriceIntelligence
+                    ? 'Checking market prices...'
+                    : 'Check current market price'}
+                </button>
               </div>
             </div>
 
@@ -206,6 +266,105 @@ function CreateListing() {
               />
             </div>
           </div>
+
+          {priceIntelligenceError && (
+            <div className="error">
+              {priceIntelligenceError}
+            </div>
+          )}
+
+          {priceIntelligence && (
+            <div className="market-price-card">
+              <h2>Market Intelligence</h2>
+
+              <p>
+                Based on {priceIntelligence.market_count} market
+                {priceIntelligence.market_count === 1 ? '' : 's'} on{' '}
+                {priceIntelligence.latest_date}.
+              </p>
+
+              <div className="listing-details">
+                <div>
+                  <span>Average modal price</span>
+                  <strong>
+                    ₹
+                    {priceIntelligence.average_modal_price_per_kg.toFixed(2)}
+                    {' / kg'}
+                  </strong>
+                </div>
+
+                <div>
+                  <span>Modal price range</span>
+                  <strong>
+                    ₹
+                    {priceIntelligence.lowest_modal_price_per_kg.toFixed(2)}
+                    {' – '}
+                    ₹
+                    {priceIntelligence.highest_modal_price_per_kg.toFixed(2)}
+                    {' / kg'}
+                  </strong>
+                </div>
+
+                {priceIntelligence.expected_price_per_kg !== null && (
+                  <div>
+                    <span>Your expected price</span>
+                    <strong>
+                      ₹
+                      {priceIntelligence.expected_price_per_kg.toFixed(2)}
+                      {' / kg'}
+                    </strong>
+                  </div>
+                )}
+
+                {priceIntelligence.expected_price_difference_per_kg !==
+                  null && (
+                  <div>
+                    <span>Difference from market average</span>
+                    <strong>
+                      ₹
+                      {priceIntelligence.expected_price_difference_per_kg.toFixed(
+                        2
+                      )}
+                      {' / kg '}
+                      (
+                      {priceIntelligence.expected_price_difference_percent.toFixed(
+                        1
+                      )}
+                      %)
+                    </strong>
+                  </div>
+                )}
+              </div>
+              {priceIntelligence.top_markets?.length > 0 && (
+  <div className="top-markets">
+    <h3>Top current markets</h3>
+
+    <div className="top-markets-list">
+      {priceIntelligence.top_markets.map((market, index) => (
+        <div
+          className="top-market-row"
+          key={`${market.market_name}-${market.district}`}
+        >
+          <span>
+            {index + 1}. {market.market_name}
+            <small>{market.district}</small>
+          </span>
+
+          <strong>
+            ₹{market.modal_price_per_kg.toFixed(2)} / kg
+          </strong>
+        </div>
+      ))}
+    </div>
+  </div>
+)}
+
+              <p>
+                This is a current mandi reference, not a guaranteed selling
+                price.
+              </p>
+            </div>
+          )}
 
           <div className="form-section">
             <h2>Pickup location</h2>
@@ -262,3 +421,4 @@ function CreateListing() {
 }
 
 export default CreateListing
+
