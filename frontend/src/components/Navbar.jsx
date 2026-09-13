@@ -1,5 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom'
-import ThemeToggle from './ThemeToggle' // Adjust path if ThemeToggle is in another folder
+import ThemeToggle from './ThemeToggle'
 
 function Navbar() {
   const navigate = useNavigate()
@@ -19,13 +19,15 @@ function Navbar() {
   return (
     <nav className="navbar">
       <div className="navbar-brand">
-        <Link to="/">AgriSaathi</Link>
+        <Link to="/">
+          AgriSaathi
+        </Link>
       </div>
 
       <div className="navbar-user">
         <ThemeToggle />
 
-        <span>
+        <span className="navbar-name">
           {user.full_name}
         </span>
 
@@ -33,7 +35,11 @@ function Navbar() {
           {user.role}
         </span>
 
-        <button onClick={handleLogout}>
+        <button
+          className="logout-button"
+          onClick={handleLogout}
+          type="button"
+        >
           Logout
         </button>
       </div>

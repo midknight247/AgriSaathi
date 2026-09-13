@@ -1,7 +1,13 @@
 import { Link } from 'react-router-dom'
 
 function BuyerDashboard() {
-  const user = JSON.parse(localStorage.getItem('user'))
+  const user = (() => {
+  try {
+    return JSON.parse(localStorage.getItem('user') || '{}');
+  } catch {
+    return {};
+  }
+})();
 
   return (
     <main className="page-container">
