@@ -953,6 +953,87 @@ def accept_offer(
         print("Accept offer error:", e)
         return {"error": "Could not accept offer"}
 
+@app.post("/offers/{offer_id}/reject")
+def reject_offer(
+    offer_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    try:
+        # Find the offer and the listing it belongs to.
+        offer_query = text("""
+            SELECT
+                o.id,
+                o.listing_id,
+                o.offer_status,
+                l.farmer_id
+            FROM buyer_offers o
+            JOIN produce_listings l
+                ON o.listing_id = l.id
+            WHERE o.id = :offer_id
+            FOR UPDATE
+        """)
+
+        offer = db.execute(
+            offer_query,
+            {"offer_id": offer_id}
+        ).mappings().first()
+
+        if offer is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Offer not found"
+            )
+
+        # Only the farmer who owns the listing can reject the offer.
+        if str(current_user["id"]) != str(offer["farmer_id"]):
+            raise HTTPException(
+                status_code=403,
+                detail="You do not own this listing"
+            )
+
+        # Only pending offers can be rejected.
+        if offer["offer_status"] != "pending":
+            raise HTTPException(
+                status_code=400,
+                detail="Offer is not pending"
+            )
+
+        # Mark the offer as rejected.
+        update_query = text("""
+            UPDATE buyer_offers
+            SET
+                offer_status = 'rejected',
+                updated_at = NOW()
+            WHERE id = :offer_id
+        """)
+
+        db.execute(
+            update_query,
+            {"offer_id": offer_id}
+        )
+
+        db.commit()
+
+        return {
+            "message": "Offer rejected successfully",
+            "offer_id": offer_id,
+            "status": "rejected"
+        }
+
+    except HTTPException:
+        db.rollback()
+        raise
+
+    except Exception as e:
+        db.rollback()
+        print("Reject offer error:", e)
+
+        raise HTTPException(
+            status_code=500,
+            detail="Could not reject offer"
+        )
+    
 @app.get("/transactions")
 def get_my_transactions(
     current_user: dict = Depends(get_current_user),

@@ -63,7 +63,7 @@ function ProtectedRoute({ role, children }) {
 function App() {
   return (
     <>
-      <Navbar />
+      {window.location.pathname !== '/farmer' && <Navbar />}
 
       <Routes>
       <Route

@@ -7,7 +7,9 @@ function Offers() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const [accepting, setAccepting] = useState('')
+  const [rejecting, setRejecting] = useState('')
   const [success, setSuccess] = useState('')
+  
 
   async function loadOffers() {
     try {
@@ -90,7 +92,46 @@ function Offers() {
       setAccepting('')
     }
   }
+  
+  async function handleReject(offerId) {
+  const confirmed = window.confirm(
+    'Are you sure you want to reject this offer?'
+  )
 
+  if (!confirmed) return
+
+  setRejecting(offerId)
+  setError('')
+  setSuccess('')
+
+  try {
+    const token = localStorage.getItem('access_token')
+
+    const data = await apiRequest(
+      `/offers/${offerId}/reject`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    )
+
+    setSuccess(
+      data.message || 'Offer rejected successfully.'
+    )
+
+    await loadOffers()
+  } catch (err) {
+    setError(
+      err instanceof Error
+        ? err.message
+        : 'Something went wrong'
+    )
+  } finally {
+    setRejecting('')
+  }
+}
   if (loading) {
     return (
       <main className="page-container">
@@ -217,19 +258,35 @@ function Offers() {
                     </div>
 
                     {offer.offer_status === 'pending' && (
-                      <button
-                        onClick={() =>
-                          handleAccept(offer.id)
-                        }
-                        disabled={
-                          accepting === offer.id
-                        }
-                      >
-                        {accepting === offer.id
-                          ? 'Accepting...'
-                          : 'Accept Offer'}
-                      </button>
-                    )}
+  <div className="offer-actions">
+    <button
+      type="button"
+      onClick={() => handleAccept(offer.id)}
+      disabled={
+        accepting === offer.id ||
+        rejecting === offer.id
+      }
+    >
+      {accepting === offer.id
+        ? 'Accepting...'
+        : 'Accept Offer'}
+    </button>
+
+    <button
+      type="button"
+      className="reject-offer-button"
+      onClick={() => handleReject(offer.id)}
+      disabled={
+        accepting === offer.id ||
+        rejecting === offer.id
+      }
+    >
+      {rejecting === offer.id
+        ? 'Rejecting...'
+        : 'Reject Offer'}
+    </button>
+  </div>
+)}
                   </div>
                 ))}
               </div>
