@@ -144,7 +144,7 @@ function AdminDashboard() {
       <div className="page-header">
         <h1>Admin Dashboard</h1>
         <p>
-          Monitor AgriSaathi users and manage the logistics
+          Monitor KisanSaathi users and manage the logistics
           provider network.
         </p>
       </div>

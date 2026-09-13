@@ -56,7 +56,7 @@ function Login() {
         <div className="login-brand-content">
           <div className="login-logo">🌾</div>
 
-          <h1>AgriSaathi</h1>
+          <h1>KisanSaathi</h1>
 
           <p>
             Connecting farmers, buyers and logistics
@@ -88,7 +88,7 @@ function Login() {
         <div className="login-card">
           <div className="login-card-header">
             <span className="login-eyebrow">
-              AgriSaathi platform
+              KisanSaathi platform
             </span>
 
             <h2>Welcome back</h2>

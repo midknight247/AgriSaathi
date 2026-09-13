@@ -73,7 +73,7 @@ function Register() {
           <div className="register-logo">🌾</div>
 
           <span className="register-eyebrow">
-            Join AgriSaathi
+            Join KisanSaathi
           </span>
 
           <h1>Build stronger agricultural connections.</h1>

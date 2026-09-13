@@ -205,7 +205,7 @@ const latestPendingOffer =
           <div className="brand-mark">🌱</div>
 
           <div>
-            <div className="brand-name">AgriSaathi</div>
+            <div className="brand-name">KisanSaathi</div>
             <div className="brand-subtitle">Farmer Portal</div>
           </div>
         </div>
@@ -340,7 +340,7 @@ const latestPendingOffer =
 
           <div className="mobile-brand">
             <span className="mobile-brand-icon">🌱</span>
-            <strong>AgriSaathi</strong>
+            <strong>KisanSaathi</strong>
           </div>
 
           <div className="topbar-search">

@@ -20,7 +20,7 @@ function Navbar() {
     <nav className="navbar">
       <div className="navbar-brand">
         <Link to="/">
-          AgriSaathi
+          KisanSaathi
         </Link>
       </div>
 

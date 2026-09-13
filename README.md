@@ -1,12 +1,12 @@
-# AgriSaathi
+# KisanSaathi
 
 ### Strengthening Market Linkages and Price Discovery for Farmers
 
-AgriSaathi is a digital agricultural marketplace designed to connect **farmers, buyers, and logistics providers** through a transparent produce-trading workflow.
+KisanSaathi is a digital agricultural marketplace designed to connect **farmers, buyers, and logistics providers** through a transparent produce-trading workflow.
 
 The platform enables farmers to list their produce, buyers to discover available commodities and submit competitive offers, farmers to accept offers, and both parties to track confirmed transactions and pickup logistics.
 
-AgriSaathi also integrates **mandi market-price data** to support informed pricing decisions and improve price discovery.
+KisanSaathi also integrates **mandi market-price data** to support informed pricing decisions and improve price discovery.
 
 > **SIH 2026 — Problem Statement SIH26132**
 > **Theme:** Agriculture, FoodTech & Rural Development
@@ -19,7 +19,7 @@ AgriSaathi also integrates **mandi market-price data** to support informed prici
 
 Traditional agricultural markets can involve multiple intermediaries, limited price visibility, fragmented buyer networks, and logistical uncertainty.
 
-AgriSaathi addresses these challenges by providing a single digital workflow:
+KisanSaathi addresses these challenges by providing a single digital workflow:
 
 ```text
 Farmer
@@ -78,7 +78,7 @@ The system is designed as an MVP demonstrating the complete marketplace lifecycl
 
 ### 📊 Market Price Discovery
 
-AgriSaathi integrates mandi price information to help users make better pricing decisions.
+KisanSaathi integrates mandi price information to help users make better pricing decisions.
 
 The market-price module provides:
 

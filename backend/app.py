@@ -94,7 +94,7 @@ def get_current_user(
     return dict(user)
 
 
-app = FastAPI(title="AgriSaathi API")
+app = FastAPI(title="KisanSaathi API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -361,7 +361,7 @@ def get_all_users(
 @app.get("/")
 def root():
     return {
-        "message": "AgriSaathi backend is running"
+        "message": "KisanSaathi backend is running"
     }
 
 
