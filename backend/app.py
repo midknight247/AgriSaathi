@@ -1782,6 +1782,47 @@ def create_logistics_provider(
 
     return provider_record
 
+@app.get("/logistics-providers")
+def get_logistics_providers(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    # Farmers, buyers, and admins can view active logistics providers.
+    if current_user["role"] not in {"farmer", "buyer", "admin"}:
+        raise HTTPException(
+            status_code=403,
+            detail="Not authorized to view logistics providers"
+        )
+
+    query = text(
+        """
+        SELECT
+            id,
+            provider_name,
+            phone_number,
+            district,
+            service_area,
+            vehicle_type,
+            capacity_kg,
+            estimated_cost,
+            is_active
+        FROM logistics_providers
+        WHERE is_active = TRUE
+        ORDER BY provider_name
+        """
+    )
+
+    result = db.execute(query)
+
+    providers = [
+        dict(row._mapping)
+        for row in result.fetchall()
+    ]
+
+    return {
+        "logistics_providers": providers
+    }
+
 class PickupRequestCreate(BaseModel):
     transaction_id: str
     logistics_provider_id: str
