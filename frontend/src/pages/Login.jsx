@@ -168,11 +168,6 @@ function Login() {
   </button>
 </div>
 
-<div className="login-footer">
-  <span>Secure role-based access</span>
-  <span>•</span>
-  <span>Farmer · Buyer · Admin</span>
-</div>
 
           <div className="login-footer">
             <span>Secure role-based access</span>

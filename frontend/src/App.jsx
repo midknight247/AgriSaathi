@@ -17,8 +17,6 @@ import MakeOffer from './pages/MakeOffer'
 import BuyerTransactions from './pages/BuyerTransactions'
 
 import AdminDashboard from './pages/AdminDashboard'
-import Navbar from './components/Navbar'
-
 import Register from './pages/Register'
 
 
@@ -63,7 +61,6 @@ function ProtectedRoute({ role, children }) {
 function App() {
   return (
     <>
-      {window.location.pathname !== '/farmer' && <Navbar />}
 
       <Routes>
       <Route
