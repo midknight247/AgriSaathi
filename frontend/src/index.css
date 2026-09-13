@@ -1785,12 +1785,20 @@ select:focus {
 
 .register-card {
   width: 100%;
-  max-width: 700px;
-  padding: 34px;
+  max-width: 720px;
+
+  height: auto;
+  min-height: max-content;
+
+  padding: 40px;
+  box-sizing: border-box;
+
   background: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: 16px;
   box-shadow: var(--shadow-card);
+
+  margin: 0 auto 40px;
 }
 
 .register-header {
@@ -4372,5 +4380,94 @@ select:focus {
     align-items: flex-start;
 
     gap: 17px;
+  }
+}
+
+.login-register-section {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  margin-top: 22px;
+  font-size: 14px;
+}
+
+.login-register-button {
+  display: inline-block;
+  border: none;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.login-register-button:hover {
+  opacity: 0.7;
+}
+
+/* Register page */
+.register-page {
+  display: grid;
+  grid-template-columns: 45% 55%;
+  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* LEFT SIDE — stays fixed */
+.register-intro {
+  position: relative;
+  height: 100vh;
+  overflow: hidden;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  padding: 60px;
+}
+
+/* Content inside the fixed left panel */
+.register-intro > div {
+  position: sticky;
+  top: 0;
+}
+
+/* RIGHT SIDE — this is the only scrolling area */
+.register-form-panel {
+  height: 100vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+
+  padding: 50px 40px;
+}
+
+/* Optional: make the scrolling smoother */
+.register-form-panel {
+  scrollbar-width: thin;
+}
+
+@media (max-width: 768px) {
+  .register-page {
+    display: block;
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
+
+  .register-intro {
+    height: auto;
+    min-height: 320px;
+    padding: 40px 25px;
+  }
+
+  .register-form-panel {
+    height: auto;
+    overflow: visible;
+    padding: 30px 20px;
   }
 }

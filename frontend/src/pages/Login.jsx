@@ -76,7 +76,9 @@ function Login() {
 
             <div>
               <strong>End-to-end coordination</strong>
-              <span>Manage transactions and produce pickup in one place.</span>
+              <span>
+                Manage transactions and produce pickup in one place.
+              </span>
             </div>
           </div>
         </div>
@@ -153,6 +155,24 @@ function Login() {
               {submitting ? 'Signing in...' : 'Sign in'}
             </button>
           </form>
+
+<div className="login-register-section">
+  <span>Don't have an account?</span>
+
+  <button
+    type="button"
+    className="login-register-button"
+    onClick={() => navigate('/register')}
+  >
+    Create an account
+  </button>
+</div>
+
+<div className="login-footer">
+  <span>Secure role-based access</span>
+  <span>•</span>
+  <span>Farmer · Buyer · Admin</span>
+</div>
 
           <div className="login-footer">
             <span>Secure role-based access</span>
