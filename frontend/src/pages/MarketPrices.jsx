@@ -13,6 +13,12 @@ function MarketPrices() {
   const [marketSearch, setMarketSearch] = useState('')
   const [currentPage, setCurrentPage] = useState(1)
 
+  const [recommendation, setRecommendation] = useState(null)
+  const [recommendationLoading, setRecommendationLoading] =
+    useState(false)
+  const [recommendationError, setRecommendationError] =
+    useState('')
+
   useEffect(() => {
     async function loadPrices() {
       try {
@@ -31,6 +37,45 @@ function MarketPrices() {
 
     loadPrices()
   }, [])
+
+  useEffect(() => {
+    async function loadRecommendation() {
+      if (!cropFilter) {
+        setRecommendation(null)
+        setRecommendationError('')
+        return
+      }
+
+      setRecommendationLoading(true)
+      setRecommendationError('')
+
+      try {
+        const params = new URLSearchParams()
+        params.set('crop_name', cropFilter)
+
+        if (districtFilter) {
+          params.set('district', districtFilter)
+        }
+
+        const data = await apiRequest(
+          `/sell-recommendation?${params.toString()}`
+        )
+
+        setRecommendation(data)
+      } catch (err) {
+        setRecommendation(null)
+        setRecommendationError(
+          err instanceof Error
+            ? err.message
+            : 'Could not load selling recommendation'
+        )
+      } finally {
+        setRecommendationLoading(false)
+      }
+    }
+
+    loadRecommendation()
+  }, [cropFilter, districtFilter])
 
   const crops = useMemo(() => {
     return [...new Set(
@@ -109,6 +154,24 @@ function MarketPrices() {
     setDistrictFilter('')
     setMarketSearch('')
     setCurrentPage(1)
+    setRecommendation(null)
+    setRecommendationError('')
+  }
+
+  function getRecommendationClass() {
+    if (!recommendation) {
+      return ''
+    }
+
+    if (recommendation.recommendation === 'SELL NOW') {
+      return 'sell-now'
+    }
+
+    if (recommendation.recommendation === 'WAIT') {
+      return 'wait'
+    }
+
+    return 'monitor'
   }
 
   if (loading) {
@@ -137,6 +200,133 @@ function MarketPrices() {
 
       {!error && (
         <>
+          {/* PRICE INTELLIGENCE */}
+          {cropFilter && (
+            <section
+              className={`card price-intelligence-card ${getRecommendationClass()}`}
+            >
+              <div className="price-intelligence-header">
+                <div>
+                  <span className="market-price-label">
+                    PRICE INTELLIGENCE
+                  </span>
+
+                  <h2>
+                    {cropFilter}
+                    {districtFilter
+                      ? ` — ${districtFilter}`
+                      : ''}
+                  </h2>
+
+                  <p>
+                    Explainable recommendation based on
+                    recent mandi prices.
+                  </p>
+                </div>
+
+                {recommendation && (
+                  <div className="recommendation-badge">
+                    {recommendation.recommendation}
+                  </div>
+                )}
+              </div>
+
+              {recommendationLoading && (
+                <p>
+                  Analysing recent market prices...
+                </p>
+              )}
+
+              {recommendationError && (
+                <div className="error">
+                  {recommendationError}
+                </div>
+              )}
+
+              {!recommendationLoading &&
+                recommendation &&
+                !recommendationError && (
+                  <>
+                    <div className="price-intelligence-grid">
+                      <div>
+                        <span>Current modal price</span>
+                        <strong>
+                          ₹
+                          {
+                            recommendation.current_modal_price_per_kg
+                          }
+                          /kg
+                        </strong>
+                      </div>
+
+                      <div>
+                        <span>7-day average</span>
+                        <strong>
+                          ₹
+                          {
+                            recommendation.average_7_day_price_per_kg
+                          }
+                          /kg
+                        </strong>
+                      </div>
+
+                      <div>
+                        <span>Difference</span>
+                        <strong>
+                          ₹
+                          {
+                            recommendation.difference_per_kg
+                          }
+                          /kg
+                        </strong>
+                      </div>
+
+                      <div>
+                        <span>Market position</span>
+                        <strong>
+                          {recommendation.difference_percent > 0
+                            ? '+'
+                            : ''}
+                          {
+                            recommendation.difference_percent
+                          }
+                          %
+                        </strong>
+                      </div>
+                    </div>
+
+                    <div className="price-intelligence-reason">
+                      <strong>
+                        {recommendation.reason}
+                      </strong>
+
+                      <p>
+                        This is a short-term market signal,
+                        not a guaranteed future-price
+                        prediction.
+                      </p>
+                    </div>
+
+                    <div className="price-intelligence-footer">
+                      <span>
+                        Latest data:{' '}
+                        {recommendation.latest_date}
+                      </span>
+
+                      <span>
+                        Based on{' '}
+                        {recommendation.data_points}{' '}
+                        recent market data point
+                        {recommendation.data_points === 1
+                          ? ''
+                          : 's'}
+                      </span>
+                    </div>
+                  </>
+                )}
+            </section>
+          )}
+
           <section className="card market-price-filters">
             <div>
               <label htmlFor="crop-filter">

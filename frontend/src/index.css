@@ -999,6 +999,125 @@ select:focus {
   }
 }
 
+.price-intelligence-card {
+  margin-bottom: 24px;
+  border-left: 5px solid;
+}
+
+.price-intelligence-card.sell-now {
+  border-left-color: #15803d;
+}
+
+.price-intelligence-card.wait {
+  border-left-color: #b45309;
+}
+
+.price-intelligence-card.monitor {
+  border-left-color: #2563eb;
+}
+
+.price-intelligence-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+.price-intelligence-header h2 {
+  margin: 4px 0;
+}
+
+.price-intelligence-header p {
+  margin: 6px 0 0;
+}
+
+.recommendation-badge {
+  font-weight: 700;
+  font-size: 1rem;
+  padding: 10px 16px;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+
+.sell-now .recommendation-badge {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.wait .recommendation-badge {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.monitor .recommendation-badge {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.price-intelligence-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.price-intelligence-grid > div {
+  padding: 14px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.price-intelligence-grid span {
+  display: block;
+  font-size: 0.85rem;
+  margin-bottom: 6px;
+}
+
+.price-intelligence-grid strong {
+  display: block;
+  font-size: 1.2rem;
+}
+
+.price-intelligence-reason {
+  padding: 14px 16px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.04);
+  margin-bottom: 16px;
+}
+
+.price-intelligence-reason p {
+  margin: 8px 0 0;
+  font-size: 0.85rem;
+}
+
+.price-intelligence-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 0.8rem;
+  opacity: 0.75;
+}
+
+@media (max-width: 800px) {
+  .price-intelligence-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .price-intelligence-header {
+    flex-direction: column;
+  }
+
+  .price-intelligence-footer {
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 500px) {
+  .price-intelligence-grid {
+    grid-template-columns: 1fr;
+  }
+}
 
 /* =========================================================
    LOGISTICS

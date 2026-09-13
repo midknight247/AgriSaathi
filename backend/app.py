@@ -1407,6 +1407,176 @@ def get_price_intelligence(
 
     return intelligence
 
+@app.get("/sell-recommendation")
+def get_sell_recommendation(
+    crop_name: str,
+    district: str | None = None,
+    market_name: str | None = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Explainable short-term selling recommendation based on
+    the latest mandi modal price versus the recent 7-day average.
+    """
+
+    crop_name = crop_name.strip()
+
+    if not crop_name:
+        raise HTTPException(
+            status_code=400,
+            detail="crop_name is required"
+        )
+
+    if district:
+        district = district.strip()
+
+    if market_name:
+        market_name = market_name.strip()
+
+    query = """
+        WITH latest_date AS (
+            SELECT MAX(price_date) AS latest_date
+            FROM market_prices
+            WHERE LOWER(crop_name) = LOWER(:crop_name)
+    """
+
+    params = {
+        "crop_name": crop_name
+    }
+
+    if district:
+        query += """
+            AND LOWER(district) = LOWER(:district)
+        """
+        params["district"] = district
+
+    if market_name:
+        query += """
+            AND LOWER(market_name) = LOWER(:market_name)
+        """
+        params["market_name"] = market_name
+
+    query += """
+        ),
+        recent_prices AS (
+            SELECT
+                price_date,
+                modal_price_per_quintal
+            FROM market_prices
+            WHERE LOWER(crop_name) = LOWER(:crop_name)
+              AND price_date >= (
+                  SELECT latest_date - INTERVAL '6 days'
+                  FROM latest_date
+              )
+              AND price_date <= (
+                  SELECT latest_date
+                  FROM latest_date
+              )
+              AND modal_price_per_quintal IS NOT NULL
+    """
+
+    if district:
+        query += """
+            AND LOWER(district) = LOWER(:district)
+        """
+
+    if market_name:
+        query += """
+            AND LOWER(market_name) = LOWER(:market_name)
+        """
+
+    query += """
+        ),
+        daily_prices AS (
+            SELECT
+                price_date,
+                AVG(modal_price_per_quintal) AS modal_price
+            FROM recent_prices
+            GROUP BY price_date
+        )
+        SELECT
+            price_date,
+            modal_price
+        FROM daily_prices
+        ORDER BY price_date DESC
+    """
+
+    result = db.execute(
+        text(query),
+        params
+    )
+
+    rows = result.mappings().all()
+
+    if not rows:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No recent market price data found for {crop_name}"
+        )
+
+    latest_price = float(rows[0]["modal_price"]) / 100
+
+    average_7_day = (
+        sum(float(row["modal_price"]) for row in rows)
+        / len(rows)
+    ) / 100
+
+    if average_7_day <= 0:
+        raise HTTPException(
+            status_code=500,
+            detail="Invalid market price data"
+        )
+
+    difference = latest_price - average_7_day
+
+    difference_percent = (
+        difference / average_7_day
+    ) * 100
+
+    # Explainable recommendation thresholds.
+    if difference_percent >= 5:
+        recommendation = "SELL NOW"
+        trend = "rising"
+        reason = (
+            f"Current modal price is {difference_percent:.1f}% "
+            f"above the recent 7-day average."
+        )
+
+    elif difference_percent <= -5:
+        recommendation = "WAIT"
+        trend = "below_average"
+        reason = (
+            f"Current modal price is {abs(difference_percent):.1f}% "
+            f"below the recent 7-day average."
+        )
+
+    else:
+        recommendation = "HOLD / MONITOR"
+        trend = "stable"
+        reason = (
+            "Current modal price is close to the recent "
+            "7-day average. Monitor the market before selling."
+        )
+
+    return {
+        "crop_name": crop_name,
+        "district": district,
+        "market_name": market_name,
+        "latest_date": rows[0]["price_date"],
+        "data_points": len(rows),
+        "current_modal_price_per_kg": round(latest_price, 2),
+        "average_7_day_price_per_kg": round(average_7_day, 2),
+        "difference_per_kg": round(difference, 2),
+        "difference_percent": round(difference_percent, 2),
+        "trend": trend,
+        "recommendation": recommendation,
+        "reason": reason,
+        "method": (
+            "Explainable rule based on current modal price "
+            "versus recent 7-day average"
+        )
+    }
+
 class LogisticsProviderCreate(BaseModel):
     provider_name: str
     phone_number: str = Field(pattern=r"^[6-9][0-9]{9}$")
@@ -1426,6 +1596,7 @@ class UserCreate(BaseModel):
     district: str | None = None
     state: str | None = None
     organization_name: str | None = None
+
 
 
 @app.post("/logistics-providers")
