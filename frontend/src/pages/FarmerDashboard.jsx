@@ -1,15 +1,182 @@
+import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import ThemeToggle from '../components/ThemeToggle'
+import { apiRequest } from '../services/api'
 
 function FarmerDashboard() {
 
-  function handleLogout() {
-  localStorage.removeItem('access_token')
-  localStorage.removeItem('user')
-  navigate('/login')
-}
   const location = useLocation()
   const navigate = useNavigate()
+
+  const [pickups, setPickups] = useState([])
+  const [loadingPickups, setLoadingPickups] = useState(true)
+
+  const [offers, setOffers] = useState([])
+  const [loadingOffers, setLoadingOffers] = useState(true)
+
+  const [listings, setListings] = useState([])
+  const [loadingListings, setLoadingListings] = useState(true)
+
+  const [listingOffers, setListingOffers] = useState([])
+const [loadingListingOffers, setLoadingListingOffers] = useState(true)
+
+  /* ================= LOAD LISTING OFFERS ================= */
+useEffect(() => {
+  async function loadListingOffers() {
+    try {
+      const token = localStorage.getItem('access_token')
+
+      const listingData = await apiRequest('/my-listings', {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      })
+
+      const farmerListings = listingData.listings || []
+      const allOffers = []
+
+      for (const listing of farmerListings) {
+        try {
+          const result = await apiRequest(
+            `/listings/${listing.id}/offers`,
+            {
+              headers: {
+                Authorization: `Bearer ${token}`,
+              },
+            }
+          )
+
+          const listingOffers = result.offers || []
+
+          listingOffers.forEach((offer) => {
+            allOffers.push({
+              ...offer,
+              crop_name: listing.crop_name,
+              variety: listing.variety,
+              listing_id: listing.id,
+            })
+          })
+        } catch (err) {
+          console.error(
+            `Failed to load offers for listing ${listing.id}:`,
+            err
+          )
+        }
+      }
+
+      setListingOffers(allOffers)
+    } catch (err) {
+      console.error('Failed to load listing offers:', err)
+    } finally {
+      setLoadingListingOffers(false)
+    }
+  }
+
+  loadListingOffers()
+}, [])
+
+  /* ================= LOAD PICKUPS ================= */
+  useEffect(() => {
+    async function loadPickups() {
+      try {
+        const data = await apiRequest('/pickup-requests')
+        setPickups(data.pickup_requests || [])
+      } catch (err) {
+        console.error('Failed to load pickups:', err)
+      } finally {
+        setLoadingPickups(false)
+      }
+    }
+
+    loadPickups()
+  }, [])
+
+  /* ================= LOAD OFFERS ================= */
+  useEffect(() => {
+    async function loadOffers() {
+      try {
+        const data = await apiRequest('/my-offers')
+        setOffers(data.offers || [])
+      } catch (err) {
+        console.error('Failed to load offers:', err)
+      } finally {
+        setLoadingOffers(false)
+      }
+    }
+
+    loadOffers()
+  }, [])
+
+  /* ================= LOAD FARMER LISTINGS ================= */
+useEffect(() => {
+  async function loadListings() {
+    try {
+      const token = localStorage.getItem('access_token')
+
+      const data = await apiRequest('/my-listings', {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      })
+
+      setListings(data.listings || [])
+    } catch (err) {
+      console.error('Failed to load farmer listings:', err)
+    } finally {
+      setLoadingListings(false)
+    }
+  }
+
+  loadListings()
+}, [])
+
+  const pendingOffers = offers.filter(
+    (offer) => offer.offer_status === 'pending'
+  )
+
+const pendingListingOffers = listingOffers.filter(
+  (offer) => offer.offer_status === 'pending'
+)
+
+const latestPendingOffer =
+  pendingListingOffers.length > 0
+    ? pendingListingOffers[0]
+    : null
+
+  /* ================= PICKUP CALCULATIONS ================= */
+  function getTodayString() {
+    const now = new Date()
+    const year = now.getFullYear()
+    const month = String(now.getMonth() + 1).padStart(2, '0')
+    const day = String(now.getDate()).padStart(2, '0')
+
+    return `${year}-${month}-${day}`
+  }
+
+  const todayString = getTodayString()
+
+  const confirmedPickups = pickups.filter(
+    (pickup) => pickup.request_status === 'confirmed'
+  )
+
+  const pickupsToday = confirmedPickups.filter(
+    (pickup) =>
+      pickup.pickup_date &&
+      pickup.pickup_date.startsWith(todayString)
+  )
+
+  const upcomingPickups = confirmedPickups.filter(
+    (pickup) =>
+      pickup.pickup_date &&
+      pickup.pickup_date >= todayString
+  )
+
+  function handleLogout() {
+    localStorage.removeItem('access_token')
+    localStorage.removeItem('user')
+    navigate('/login')
+  }
+
 
   let user = {}
 
@@ -86,7 +253,9 @@ function FarmerDashboard() {
           >
             <span className="sidebar-icon">🤝</span>
             <span>Offers</span>
-            <span className="nav-count offer-count">3</span>
+            <span className="nav-count offer-count">
+              {loadingOffers ? '—' : pendingOffers.length}
+            </span>
           </Link>
 
           <Link
@@ -117,7 +286,9 @@ function FarmerDashboard() {
           >
             <span className="sidebar-icon">🚚</span>
             <span>Pickup & Logistics</span>
-            <span className="nav-count">2</span>
+            <span className="nav-count">
+              {loadingPickups ? '—' : upcomingPickups.length}
+            </span>
           </Link>
 
           <div className="nav-section-title secondary-title">
@@ -288,7 +459,7 @@ function FarmerDashboard() {
               </div>
 
               <div className="stat-value">
-                3
+                {loadingOffers ? '—' : pendingOffers.length}
               </div>
 
               <div className="stat-label">
@@ -344,9 +515,9 @@ function FarmerDashboard() {
                 </span>
               </div>
 
-              <div className="stat-value">
-                2
-              </div>
+<div className="stat-value">
+  {loadingPickups ? '—' : pickupsToday.length}
+</div>
 
               <div className="stat-label">
                 Pickups Today
@@ -379,95 +550,99 @@ function FarmerDashboard() {
                 </h2>
               </div>
 
-              <span className="attention-count">
-                2 items
-              </span>
+<span className="attention-count">
+  {pendingListingOffers.length + pickupsToday.length}{' '}
+  {pendingListingOffers.length + pickupsToday.length === 1
+    ? 'item'
+    : 'items'}
+</span>
 
             </div>
 
 
             <div className="attention-list">
 
-              <div className="attention-item">
+{latestPendingOffer && (
+  <div className="attention-item">
+    <div className="attention-icon offer">🤝</div>
 
-                <div className="attention-icon offer">
-                  🤝
-                </div>
+    <div className="attention-content">
+      <div className="attention-title-row">
+        <h3>New buyer offer received</h3>
+        <span className="attention-time">Recently</span>
+      </div>
 
-                <div className="attention-content">
+      <p>
+        A buyer has offered ₹
+        {latestPendingOffer.offered_price_per_kg}/kg for{' '}
+        {latestPendingOffer.offered_quantity_kg} kg of{' '}
+        <strong>{latestPendingOffer.crop_name}</strong>
+        {latestPendingOffer.variety
+          ? ` (${latestPendingOffer.variety})`
+          : ''}
+        .
+      </p>
 
-                  <div className="attention-title-row">
-                    <h3>
-                      New buyer offer received
-                    </h3>
+      <div className="attention-meta">
+        <strong>Offer needs review</strong>
+        <span>•</span>
+        <span>
+          Check the offered price before accepting
+        </span>
+      </div>
+    </div>
 
-                    <span className="attention-time">
-                      Recently
-                    </span>
-                  </div>
+    <Link
+      to="/farmer/offers"
+      className="attention-action"
+    >
+      Review →
+    </Link>
+  </div>
+)}
 
-                  <p>
-                    Ramesh Traders has made an offer on your
-                    produce listing.
-                  </p>
+{pickupsToday.length > 0 && (
+  <div className="attention-item">
 
-                  <div className="attention-meta">
-                    <strong>Offer needs review</strong>
-                    <span>•</span>
-                    <span>Check the offered price before accepting</span>
-                  </div>
+    <div className="attention-icon pickup">
+      🚚
+    </div>
 
-                </div>
+    <div className="attention-content">
 
-                <Link
-                  to="/farmer/offers"
-                  className="attention-action"
-                >
-                  Review →
-                </Link>
+      <div className="attention-title-row">
+        <h3>
+          Pickup scheduled for today
+        </h3>
 
-              </div>
+        <span className="attention-time">
+          Today
+        </span>
+      </div>
 
+      <p>
+        You have {pickupsToday.length}{' '}
+        confirmed pickup
+        {pickupsToday.length !== 1 ? 's' : ''} scheduled for today.
+      </p>
 
-              <div className="attention-item">
+      <div className="attention-meta">
+        <strong>Pickup & logistics</strong>
+        <span>•</span>
+        <span>Check your pickup status</span>
+      </div>
 
-                <div className="attention-icon pickup">
-                  🚚
-                </div>
+    </div>
 
-                <div className="attention-content">
+    <Link
+      to="/farmer/logistics"
+      className="attention-action"
+    >
+      Track →
+    </Link>
 
-                  <div className="attention-title-row">
-                    <h3>
-                      Pickup scheduled for today
-                    </h3>
-
-                    <span className="attention-time">
-                      Today
-                    </span>
-                  </div>
-
-                  <p>
-                    A pickup request is scheduled for one of
-                    your confirmed transactions.
-                  </p>
-
-                  <div className="attention-meta">
-                    <strong>Pickup & logistics</strong>
-                    <span>•</span>
-                    <span>Check your pickup status</span>
-                  </div>
-
-                </div>
-
-                <Link
-                  to="/farmer/logistics"
-                  className="attention-action"
-                >
-                  Track →
-                </Link>
-
-              </div>
+  </div>
+)}
 
             </div>
 

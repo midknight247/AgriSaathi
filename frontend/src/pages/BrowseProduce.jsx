@@ -76,38 +76,51 @@ function BrowseProduce() {
               </span>
             </div>
 
-            <div className="produce-details">
-              <div>
-                <span>Quantity</span>
-                <strong>
-                  {listing.quantity_kg} kg
-                </strong>
-              </div>
+<div className="produce-details">
+  <div>
+    <span>Quantity</span>
+    <strong>
+      {listing.quantity_kg} kg
+    </strong>
+  </div>
 
-              <div>
-                <span>Expected price</span>
-                <strong>
-                  {listing.expected_price_per_kg
-                    ? `₹${listing.expected_price_per_kg} / kg`
-                    : 'Not specified'}
-                </strong>
-              </div>
+  <div>
+    <span>Expected price</span>
+    <strong>
+      {listing.expected_price_per_kg
+        ? `₹${listing.expected_price_per_kg} / kg`
+        : 'Not specified'}
+    </strong>
+  </div>
 
-              <div>
-                <span>Pickup location</span>
-                <strong>
-                  {listing.pickup_village},{' '}
-                  {listing.pickup_district}
-                </strong>
-              </div>
-            </div>
+  <div>
+    <span>Pickup location</span>
+    <strong>
+      {listing.pickup_village},{' '}
+      {listing.pickup_district}
+    </strong>
+  </div>
+</div>
 
-            <Link
-              to={`/buyer/produce/${listing.id}/offer`}
-              className="primary-link"
-            >
-              Make Offer
-            </Link>
+{/* FARMER'S MESSAGE */}
+{listing.description && (
+  <div className="farmer-message">
+    <span className="farmer-message-label">
+      Farmer's message
+    </span>
+
+    <p>
+      {listing.description}
+    </p>
+  </div>
+)}
+
+<Link
+  to={`/buyer/produce/${listing.id}/offer`}
+  className="primary-link"
+>
+  Make Offer
+</Link>
           </article>
         ))}
       </section>
