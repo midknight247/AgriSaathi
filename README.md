@@ -1,96 +1,95 @@
-# KisanSaathi
+# AgriSaathi 🌾
 
-### Strengthening Market Linkages and Price Discovery for Farmers
+### A digital marketplace connecting farmers and buyers with transparent trading and logistics support.
 
-KisanSaathi is a digital agricultural marketplace designed to connect **farmers, buyers, and logistics providers** through a transparent produce-trading workflow.
+AgriSaathi is a web-based agricultural marketplace developed as a solution for **Smart India Hackathon (SIH) 2026 — Problem Statement 26132**.
 
-The platform enables farmers to list their produce, buyers to discover available commodities and submit competitive offers, farmers to accept offers, and both parties to track confirmed transactions and pickup logistics.
-
-KisanSaathi also integrates **mandi market-price data** to support informed pricing decisions and improve price discovery.
-
-> **SIH 2026 — Problem Statement SIH26132**
-> **Theme:** Agriculture, FoodTech & Rural Development
-> **Sponsor:** Government of Maharashtra
-> **Track:** Software
+The platform is designed to simplify the process of connecting farmers with buyers, negotiating crop prices, confirming transactions, and arranging agricultural logistics through a role-based digital workflow.
 
 ---
 
-## Overview
+## 📌 Problem Statement
 
-Traditional agricultural markets can involve multiple intermediaries, limited price visibility, fragmented buyer networks, and logistical uncertainty.
+Farmers often face difficulties in accessing reliable buyers, discovering fair market prices, negotiating directly, and arranging transportation after a sale.
 
-KisanSaathi addresses these challenges by providing a single digital workflow:
+At the same time, buyers may struggle to find suitable agricultural produce from verified listings and communicate efficiently with farmers.
+
+AgriSaathi addresses these challenges by bringing the major stages of agricultural trade into a single platform:
+
+**Listing → Discovery → Offer → Acceptance → Transaction → Pickup**
+
+The goal is to make agricultural trading more transparent, structured, and accessible.
+
+---
+
+## 💡 Our Solution
+
+AgriSaathi provides separate interfaces and workflows for:
+
+- 👨‍🌾 Farmers
+- 🛒 Buyers
+- 🛡️ Administrators
+- 🚚 Logistics providers
+
+Farmers can list their produce with details such as crop, quantity, expected price, and other relevant information.
+
+Buyers can browse available listings and submit offers based on their requirements.
+
+Once a farmer accepts an offer, the platform creates a confirmed transaction and enables the parties to proceed toward pickup and logistics arrangements.
+
+---
+
+# ✨ Key Features
+
+## 👨‍🌾 Farmer Marketplace
+
+Farmers can:
+
+- Create and manage crop listings
+- Specify quantity and expected price
+- View offers received from buyers
+- Accept or reject offers
+- Monitor confirmed transactions
+- Arrange pickup after accepting an offer
+- View pickup and logistics information
+- Track important activities through the farmer dashboard
+
+The farmer dashboard provides a centralized view of listings, offers, pickups, and marketplace activity.
+
+---
+
+## 🛒 Buyer Marketplace
+
+Buyers can:
+
+- Browse available agricultural listings
+- View crop and pricing information
+- Submit purchase offers
+- Track submitted offers
+- View transaction information
+- Monitor pickup-related activity
+
+This allows buyers to interact directly with available produce instead of relying entirely on traditional intermediary-based processes.
+
+---
+
+## 🤝 Offer & Negotiation Workflow
+
+The platform supports a structured offer system.
+
+A simplified workflow is:
 
 ```text
-Farmer
-   │
-   ├── Create Produce Listing
-   │
-   ▼
-Marketplace
-   │
-   ├── Market Price Reference
-   │
-   ▼
-Buyer
-   │
-   ├── Submit Offer
-   │
-   ▼
-Farmer
-   │
-   ├── Accept / Reject Offer
-   │
-   ▼
-Confirmed Transaction
-   │
-   ▼
-Pickup & Logistics
-```
-
-The system is designed as an MVP demonstrating the complete marketplace lifecycle rather than attempting to replace existing agricultural supply chains.
-
----
-
-## Key Features
-
-### 🌾 Farmer Marketplace
-
-* Create produce listings
-* Specify crop, variety, quantity and expected price
-* Specify harvest and pickup information
-* View all personal listings
-* Monitor incoming buyer offers
-* Accept or reject offers
-* View confirmed transactions
-* Track pickup and logistics requests
-
-### 🤝 Buyer Marketplace
-
-* Browse currently active produce listings
-* Submit competitive offers
-* Specify offered price and quantity
-* Include a message with an offer
-* Track submitted offers
-* View accepted and rejected offers
-* View confirmed purchases
-* Track pickup and delivery information
-
-### 📊 Market Price Discovery
-
-KisanSaathi integrates mandi price information to help users make better pricing decisions.
-
-The market-price module provides:
-
-* Crop filtering
-* District filtering
-* Market search
-* Minimum price
-* Modal price
-* Maximum price
-* Arrival quantity when available
-* Market/date information
-* Pagination
-* Data-source attribution
-
-The current implementation uses Maharashtra market data sourced through the Governm
+Farmer creates listing
+        ↓
+Buyer views listing
+        ↓
+Buyer submits offer
+        ↓
+Farmer reviews offer
+        ↓
+Accept / Reject
+        ↓
+Confirmed transaction
+        ↓
+Arrange pickup
