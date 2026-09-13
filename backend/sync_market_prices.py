@@ -1,29 +1,32 @@
 import json
 import os
-import subprocess
 import sys
+import time
 from datetime import datetime
 
+import requests
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
-
 
 RESOURCE_ID = "9ef84268-d588-465a-a308-a864a43d0070"
 API_URL = f"https://api.data.gov.in/resource/{RESOURCE_ID}"
 
+MAX_RETRIES = 4
+REQUEST_TIMEOUT = 180
+
 
 def fetch_market_prices():
-    load_dotenv()
+    load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
     api_key = os.getenv("DATA_GOV_API_KEY")
     database_url = os.getenv("DATABASE_URL")
 
     if not api_key:
-        print("ERROR: DATA_GOV_API_KEY is missing from .env")
+        print("ERROR: DATA_GOV_API_KEY is missing")
         sys.exit(1)
 
     if not database_url:
-        print("ERROR: DATABASE_URL is missing from .env")
+        print("ERROR: DATABASE_URL is missing")
         sys.exit(1)
 
     url = (
@@ -36,29 +39,64 @@ def fetch_market_prices():
 
     print("Fetching Maharashtra market prices from Data.gov.in...")
 
-    result = subprocess.run(
-        [
-            "curl.exe",
-            "-sS",
-            "--globoff",
-            "--max-time",
-            "60",
-            url,
-        ],
-        capture_output=True,
-        text=True,
-    )
+    data = None
 
-    if result.returncode != 0:
-        print("ERROR: curl request failed")
-        print(result.stderr)
-        sys.exit(1)
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            response = requests.get(
+                url,
+                timeout=REQUEST_TIMEOUT
+            )
 
-    try:
-        data = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        print("ERROR: Data.gov.in returned invalid JSON")
-        print(result.stdout[:2000])
+            if response.status_code in (502, 503, 504):
+                print(
+                    f"Data.gov.in returned HTTP {response.status_code}. "
+                    f"Attempt {attempt}/{MAX_RETRIES}."
+                )
+
+                if attempt < MAX_RETRIES:
+                    wait_seconds = 2 ** attempt
+                    print(f"Retrying in {wait_seconds} seconds...")
+                    time.sleep(wait_seconds)
+                    continue
+
+                print("ERROR: Data.gov.in remained unavailable after retries.")
+                sys.exit(1)
+
+            response.raise_for_status()
+
+            try:
+                data = response.json()
+            except ValueError:
+                print("ERROR: Data.gov.in returned invalid JSON")
+                print(response.text[:1000])
+                sys.exit(1)
+
+            break
+
+        except requests.Timeout:
+            print(
+                f"Data.gov.in request timed out. "
+                f"Attempt {attempt}/{MAX_RETRIES}."
+            )
+
+            if attempt < MAX_RETRIES:
+                wait_seconds = 2 ** attempt
+                print(f"Retrying in {wait_seconds} seconds...")
+                time.sleep(wait_seconds)
+            else:
+                print("ERROR: Data.gov.in timed out after retries.")
+                sys.exit(1)
+
+        except requests.RequestException as e:
+            print(
+                f"Data.gov.in request failed: "
+                f"{type(e).__name__}"
+            )
+            sys.exit(1)
+
+    if not data:
+        print("ERROR: No response data received")
         sys.exit(1)
 
     records = data.get("records", [])
@@ -152,6 +190,7 @@ def fetch_market_prices():
                     },
                 )
                 updated += 1
+
             else:
                 db.execute(
                     text(
